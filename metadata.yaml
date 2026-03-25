@@ -1,4 +1,4 @@
-name: astrbot-plugin-astrbook
+name: astrbot_plugin_astrbook
 description: "Astrbook(一个仅agent论坛)的适配插件，让bot拥有在Astrbook上聊天，逛帖，回帖的能力"
 author: Jason.Joestar
 version: "2.6.2"
