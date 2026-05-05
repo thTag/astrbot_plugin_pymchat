@@ -7,6 +7,7 @@ This plugin also registers the AstrBook platform adapter.
 
 import asyncio
 from copy import deepcopy
+from typing import Any
 
 import aiohttp
 from astrbot.api import logger
@@ -114,6 +115,60 @@ class AstrbookPlugin(Star):
         ]
         return req
 
+    @staticmethod
+    def _plain_text_from_send_message_args(tool_args: dict | None) -> str:
+        if not tool_args:
+            return ""
+        messages = tool_args.get("messages")
+        if not isinstance(messages, list):
+            return ""
+
+        parts: list[str] = []
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            if str(message.get("type", "")).lower() != "plain":
+                continue
+            text = str(message.get("text", "")).strip()
+            if text:
+                parts.append(text)
+        return " ".join(parts).strip()
+
+    @staticmethod
+    def _target_session_from_send_message_args(
+        event: AstrMessageEvent,
+        tool_args: dict | None,
+    ) -> str:
+        current_session = event.unified_msg_origin
+        raw_session: Any = None
+        if tool_args:
+            raw_session = tool_args.get("session")
+        if raw_session is None:
+            return current_session
+        if not isinstance(raw_session, str):
+            return str(raw_session)
+        if ":" in raw_session:
+            return raw_session
+        return (
+            f"{event.get_platform_id()}:"
+            f"{event.get_message_type().value}:"
+            f"{raw_session}"
+        )
+
+    @staticmethod
+    def _build_active_send_failure_repair_prompt(reason: str | None) -> str:
+        detail = f" Reason: {reason}" if reason else ""
+        return (
+            "Your previous call to AstrBot's built-in send_message_to_user tool "
+            "did not produce a confirmed AstrBook delivery receipt."
+            f"{detail} For this AstrBook event, do not use send_message_to_user "
+            "as the reply path. You must call the relevant AstrBook tool instead: "
+            "reply_thread(thread_id=..., content=...), "
+            "reply_floor(reply_id=..., content=...), or "
+            "send_dm_message(target_user_id=..., content=...). "
+            "Do not answer with plain assistant text."
+        )
+
     @filter.on_llm_request(priority=100)
     async def remind_astrbook_tool_reply(
         self,
@@ -124,7 +179,10 @@ class AstrbookPlugin(Star):
         if not self._is_astrbook_event(event):
             return
 
-        if req.func_tool and event.session_id == "astrbook_browse_system":
+        if req.func_tool and (
+            event.session_id == "astrbook_browse_system"
+            or event.get_extra("astrbook_active_send_retry", False)
+        ):
             req.func_tool.remove_tool("send_message_to_user")
 
         req.extra_user_content_parts.append(
@@ -191,6 +249,33 @@ class AstrbookPlugin(Star):
         resp: LLMResponse,
     ):
         """Retry AstrBook events when the model replied with plain text instead of tools."""
+        if event.get_extra("astrbook_active_send_failed", False) and not event.get_extra(
+            "astrbook_tool_reply_sent", False
+        ):
+            event.stop_event()
+            if event.get_extra("astrbook_active_send_retry", False):
+                logger.error(
+                    "[AstrBook] built-in active send failed again after retry; "
+                    "event stopped"
+                )
+                return
+
+            prompt = event.get_extra("astrbook_active_send_repair_prompt")
+            if isinstance(prompt, str) and prompt:
+                event.set_extra("plain_assistant_response_repair_prompt", prompt)
+
+            req = self._clone_repair_request(event)
+            repair_event = self._clone_astrbook_event_for_repair(event, req)
+            if repair_event is None:
+                return
+            repair_event.set_extra("astrbook_active_send_retry", True)
+            repair_event.adapter.commit_event(repair_event)
+            logger.warning(
+                "[AstrBook] built-in active send was not confirmed; "
+                "re-queued event with AstrBook tool-use prompt"
+            )
+            return
+
         if not self._should_repair_plain_astrbook_response(event, resp):
             return
 
@@ -219,7 +304,7 @@ class AstrbookPlugin(Star):
         tool_args: dict | None,
         tool_result,
     ):
-        """Treat successful built-in active sends as AstrBook tool replies."""
+        """Treat only adapter-confirmed built-in active sends as AstrBook replies."""
         if not self._is_astrbook_event(event):
             return
         if event.session_id == "astrbook_browse_system":
@@ -229,7 +314,44 @@ class AstrbookPlugin(Star):
         if "Message sent to session" not in str(tool_result):
             return
 
-        event.set_extra("astrbook_tool_reply_sent", True)
+        adapter = self._get_astrbook_adapter()
+        if not isinstance(adapter, AstrBookAdapter):
+            return
+
+        target_session = self._target_session_from_send_message_args(event, tool_args)
+        text = self._plain_text_from_send_message_args(tool_args)
+        receipt = adapter.consume_active_send_receipt(
+            session=target_session,
+            text=text,
+        )
+
+        if receipt is not None and receipt.ok:
+            event.set_extra("astrbook_active_send_failed", False)
+            event.set_extra("astrbook_tool_reply_sent", True)
+            event.set_extra("astrbook_active_send_receipt", receipt)
+            logger.info(
+                "[AstrBook] built-in send_message_to_user confirmed by adapter: "
+                "kind=%s, target=%s, confirm=%s",
+                receipt.kind,
+                receipt.target_id,
+                receipt.confirm_level,
+            )
+            return
+
+        reason = "adapter did not record an AstrBook delivery receipt"
+        if receipt is not None and receipt.error:
+            reason = receipt.error
+        event.set_extra("astrbook_active_send_failed", True)
+        event.set_extra(
+            "astrbook_active_send_repair_prompt",
+            self._build_active_send_failure_repair_prompt(reason),
+        )
+        logger.warning(
+            "[AstrBook] built-in send_message_to_user returned success text but "
+            "AstrBook delivery was not confirmed: target_session=%s, reason=%s",
+            target_session,
+            reason,
+        )
 
     @filter.on_decorating_result(priority=100)
     async def reject_plain_astrbook_result_before_send(self, event: AstrMessageEvent):
