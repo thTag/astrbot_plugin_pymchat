@@ -46,7 +46,6 @@ class PymChatClient:
     async def _request(self, method: str, url: str, params: dict = None, data: dict = None) -> Tuple[bool, Optional[dict], Optional[APIError]]:
         if params is None:
             params = {}
-        # 清理 None 值
         params = self._clean_params(params)
 
         if self.debug:
@@ -122,7 +121,6 @@ class PymChatClient:
 
     async def _get(self, params: dict) -> Tuple[bool, Optional[dict], Optional[APIError]]:
         await self.ensure_session()
-        # 检查 api_key
         if not self.api_key:
             return False, None, APIError(401, "API Key 未设置，请检查配置", 401)
         return await self._request("GET", self.BASE_URL, params=params)
@@ -354,46 +352,78 @@ class PymChatPlugin(Star):
         logger.info(f"PymChat 插件初始化，调试模式: {'开启' if self.debug else '关闭'}")
 
     def _load_config(self) -> dict:
+        """加载配置，优先使用 AstrBot 的插件配置系统"""
+        config = {}
         try:
+            # 尝试从框架获取配置
             config = self.context.get_plugin_config()
             if config:
-                return config
+                logger.info(f"从框架加载到配置: {list(config.keys())}")
+            else:
+                logger.warning("框架返回的配置为空，尝试读取本地配置文件")
         except AttributeError:
             logger.warning("当前框架版本不支持 get_plugin_config()，尝试读取本地配置文件。")
         except Exception as e:
             logger.error(f"读取插件配置失败: {e}")
 
-        config_file = os.path.join(os.path.dirname(__file__), "config.json")
-        if os.path.exists(config_file):
-            with open(config_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return {}
+        # 如果框架没有返回有效配置，则读取本地 config.json
+        if not config:
+            config_file = os.path.join(os.path.dirname(__file__), "config.json")
+            if os.path.exists(config_file):
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                logger.info(f"从本地文件加载配置: {list(config.keys())}")
+            else:
+                logger.warning("本地配置文件不存在，使用空配置")
+
+        # 输出配置摘要（不输出密码）
+        safe_keys = ['username', 'api_key', 'bot_name', 'trigger_keywords', 'poll_interval', 'debug_mode']
+        logger.info("当前配置摘要:")
+        for k in safe_keys:
+            if k in config:
+                val = config[k]
+                if k == 'api_key' and val:
+                    val = val[:8] + '...' if len(val) > 8 else '***'
+                logger.info(f"  {k}: {val}")
+        if 'password' in config and config['password']:
+            logger.info("  password: (已设置)")
+        return config
 
     async def initialize(self):
         logger.info("PymChat 插件初始化中...")
+        logger.info(f"插件配置内容（不含密码）: username={self.username}, api_key={'已设置' if self.api_key else '未设置'}, trigger={self.trigger_keywords}")
+
         self.client = PymChatClient(api_key=self.api_key if self.api_key else None, debug=self.debug)
 
-        # 认证：优先使用 api_key，否则用用户名密码登录
-        if not self.client.api_key and self.username and self.password:
-            logger.info("使用用户名密码登录获取 API Key...")
-            success, api_key, error = await self.client.login(self.username, self.password)
-            if not success:
-                error_msg = f"登录失败: {error.message} (code={error.code})" if error else "登录失败"
-                logger.error(error_msg)
-                return
-        elif self.client.api_key:
+        # 认证逻辑
+        auth_success = False
+        if self.api_key:
             logger.info("使用提供的 API Key 验证...")
             success, profile, error = await self.client.get_profile()
-            if not success:
-                error_msg = f"API Key 无效: {error.message} (code={error.code})" if error else "API Key 无效"
+            if success:
+                self.client.user_id = profile.get("user_id")
+                auth_success = True
+                logger.info(f"API Key 验证成功，用户ID: {self.client.user_id}")
+            else:
+                error_msg = f"API Key 无效: {error.message if error else '未知错误'}"
                 logger.error(error_msg)
-                return
-            self.client.user_id = profile.get("user_id") if profile else None
-            if self.debug:
-                logger.debug(f"API Key 验证成功，用户ID: {self.client.user_id}")
+        elif self.username and self.password:
+            logger.info(f"尝试使用用户名密码登录: {self.username}")
+            success, api_key, error = await self.client.login(self.username, self.password)
+            if success:
+                self.api_key = api_key
+                self.client.api_key = api_key
+                auth_success = True
+                logger.info("用户名密码登录成功，已获取 API Key")
+            else:
+                error_msg = f"登录失败: {error.message if error else '未知错误'}"
+                logger.error(error_msg)
         else:
-            logger.error("未提供 api_key 或用户名密码，PymChat 插件无法启动")
-            return
+            logger.error("未提供 api_key 或用户名密码，无法认证")
+
+        if not auth_success:
+            logger.error("PymChat 认证失败，插件将保持停止状态。请检查配置后重启插件。")
+            return  # 初始化失败，不启动轮询
 
         # 获取机器人昵称
         if self.bot_name_config:
