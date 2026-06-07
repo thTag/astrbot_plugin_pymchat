@@ -1,18 +1,14 @@
 import asyncio
 import aiohttp
-import re
 from typing import Dict, Any, List, Optional
 
-# 修正导入：使用 astrbot.api.message_components 而不是 astrbot.api.message
-from astrbot.api.message_components import MessageChain, Plain
+from astrbot.core.message import MessageChain
+from astrbot.api.message_components import Plain
 from astrbot.api.platform import Platform, AstrBotMessage, PlatformMetadata, register_platform_adapter
 from astrbot.api.event import MessageSession
 from astrbot.api import logger
 
-@register_platform_adapter(
-    "pymchat",
-    "PymChat 平台适配器"
-)
+@register_platform_adapter("pymchat", "PymChat 平台适配器")
 class PymChatAdapter(Platform):
     def __init__(self, platform_config: dict, platform_settings: dict, event_queue: asyncio.Queue):
         super().__init__(event_queue)
@@ -109,6 +105,7 @@ class PymChatAdapter(Platform):
                 ab_msg.message_id = str(msg_id)
                 ab_msg.raw = raw
 
+                # 构造 MessageSession
                 session = MessageSession(
                     session_id=raw.get("sid", "unknown"),
                     platform_session_id=raw.get("sid", "unknown"),
