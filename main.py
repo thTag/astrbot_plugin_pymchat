@@ -4,7 +4,7 @@ from .adapter import PymChatAdapter
 
 @register(
     "astrbot_plugin_pymchat",
-    "叹点",
+    "叹号大帝",
     "PymChat 平台适配器",
     "1.0.0",
     "https://github.com/thTag/astrbot_plugin_pymchat"

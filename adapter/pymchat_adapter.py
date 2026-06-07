@@ -3,19 +3,23 @@ import aiohttp
 import re
 from typing import Dict, Any, List, Optional
 
-from astrbot.api.platform import Platform, AstrBotMessage, PlatformMetadata
-from astrbot.api.message import MessageChain, Plain
+# 修正导入：使用 astrbot.api.message_components 而不是 astrbot.api.message
+from astrbot.api.message_components import MessageChain, Plain
+from astrbot.api.platform import Platform, AstrBotMessage, PlatformMetadata, register_platform_adapter
 from astrbot.api.event import MessageSession
 from astrbot.api import logger
 
+@register_platform_adapter(
+    "pymchat",
+    "PymChat 平台适配器"
+)
 class PymChatAdapter(Platform):
-    def __init__(self, platform_config: dict, platform_settings: dict, event_queue: asyncio.Queue) -> None:
-        # ✅ 修正：接收三个参数，正确调用父类
+    def __init__(self, platform_config: dict, platform_settings: dict, event_queue: asyncio.Queue):
         super().__init__(event_queue)
         self.platform_config = platform_config
         self.platform_settings = platform_settings
 
-        # 从用户配置中读取
+        # 读取配置
         self.username = platform_config.get("username")
         self.password = platform_config.get("password")
         self.api_base = platform_config.get("api_base", "https://chat.qplm.xyz/api/ac.php")
@@ -31,28 +35,22 @@ class PymChatAdapter(Platform):
         self._last_msg_id = 0
         self._processed_ids = set()
 
-    # ✅ 新增：返回平台元信息
     def meta(self) -> PlatformMetadata:
-        return PlatformMetadata(
-            "pymchat",
-            "PymChat 平台适配器"
-        )
+        return PlatformMetadata("pymchat", "PymChat 平台适配器")
 
     async def run(self):
-        """启动适配器，AstrBot 加载平台后调用"""
         if not self.username or not self.password:
-            logger.error("[PymChat] 未配置用户名或密码，请检查插件配置")
+            logger.error("[PymChat] 未配置用户名或密码")
             return
         if not await self._ensure_valid_api_key():
-            logger.error("[PymChat] 无法获取有效的 API Key")
+            logger.error("[PymChat] 无法获取 API Key")
             return
         self._running = True
         self._poll_task = asyncio.create_task(self._poll_messages())
-        logger.info("[PymChat] 适配器已启动，开始轮询公共聊天室消息")
+        logger.info("[PymChat] 适配器已启动")
 
     async def send_by_session(self, session: MessageSession, message_chain: MessageChain):
-        """✅ 核心发送方法：AstrBot 通过此方法让适配器回复消息"""
-        # 提取文本
+        """发送消息"""
         content = self._extract_text(message_chain)
         if not content:
             return
@@ -62,14 +60,12 @@ class PymChatAdapter(Platform):
         if not await self._ensure_valid_api_key():
             return
 
-        # 发送消息到 PymChat
         params = {
             "api_key": self.api_key,
             "action": "send_message",
             "content": content,
             "browser_id": self.browser_id
         }
-        # session.contact_id 可以是聊天室ID或用户ID
         if session.contact_id:
             params["target"] = session.contact_id
 
@@ -83,33 +79,28 @@ class PymChatAdapter(Platform):
                         else:
                             logger.error(f"[PymChat] 发送失败: {data.get('message')}")
                     elif resp.status == 429:
-                        logger.warning("[PymChat] 触发速率限制，等待150秒...")
+                        logger.warning("[PymChat] 触发速率限制，等待150秒")
                         await asyncio.sleep(150)
         except Exception as e:
-            logger.error(f"[PymChat] 发送消息异常: {e}")
+            logger.error(f"[PymChat] 发送异常: {e}")
 
     async def stop(self):
-        """停止适配器"""
         self._running = False
         if self._poll_task:
             self._poll_task.cancel()
         logger.info("[PymChat] 适配器已停止")
 
-    # ---------- 以下为内部方法 ----------
+    # ---------- 内部方法 ----------
     async def _poll_messages(self):
-        """轮询公共聊天室新消息"""
         while self._running:
             if not await self._ensure_valid_api_key():
                 await asyncio.sleep(60)
                 continue
-
             messages = await self._fetch_new_messages()
             for raw in messages:
                 msg_id = raw.get("id")
                 if not msg_id or msg_id in self._processed_ids:
                     continue
-
-                # 构造 AstrBotMessage
                 ab_msg = AstrBotMessage()
                 ab_msg.content = raw.get("content", "")
                 ab_msg.sender = raw.get("sn") or raw.get("sid", "")
@@ -118,7 +109,6 @@ class PymChatAdapter(Platform):
                 ab_msg.message_id = str(msg_id)
                 ab_msg.raw = raw
 
-                # 创建消息会话并提交到事件队列
                 session = MessageSession(
                     session_id=raw.get("sid", "unknown"),
                     platform_session_id=raw.get("sid", "unknown"),
@@ -127,14 +117,11 @@ class PymChatAdapter(Platform):
                 )
                 await self._event_queue.put(session)
                 self._processed_ids.add(msg_id)
-
                 if len(self._processed_ids) > 10000:
                     self._processed_ids.clear()
-
             await asyncio.sleep(self.poll_interval)
 
     async def _fetch_new_messages(self) -> List[Dict]:
-        """获取公共聊天室新消息"""
         params = {
             "api_key": self.api_key,
             "action": "get_messages",
@@ -143,7 +130,6 @@ class PymChatAdapter(Platform):
         }
         if self._last_msg_id:
             params["last_id"] = self._last_msg_id
-
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(self.api_base, params=params) as resp:
@@ -155,8 +141,6 @@ class PymChatAdapter(Platform):
                             if messages and "last_id" in msg_data:
                                 self._last_msg_id = msg_data["last_id"]
                             return messages
-                    else:
-                        logger.warning(f"[PymChat] 获取消息失败: HTTP {resp.status}")
         except Exception as e:
             logger.error(f"[PymChat] 拉取消息异常: {e}")
         return []
@@ -165,7 +149,7 @@ class PymChatAdapter(Platform):
         if not self.api_key:
             return await self._login_and_get_api_key()
         if not await self._test_api_key():
-            logger.warning("[PymChat] API Key 失效，重新登录...")
+            logger.warning("[PymChat] API Key 失效，重新登录")
             self.api_key = None
             return await self._login_and_get_api_key()
         return True
@@ -179,7 +163,7 @@ class PymChatAdapter(Platform):
                         result = await resp.json()
                         if result.get("status") == 200:
                             self.api_key = result["data"]["api_key"]
-                            logger.info("[PymChat] 登录成功，API Key 已获取")
+                            logger.info("[PymChat] 登录成功")
                             return True
                         else:
                             logger.error(f"[PymChat] 登录失败: {result.get('message')}")
@@ -207,7 +191,6 @@ class PymChatAdapter(Platform):
         return False
 
     def _extract_text(self, message_chain: MessageChain) -> str:
-        """从 MessageChain 中提取纯文本"""
         parts = []
         for comp in message_chain:
             if isinstance(comp, Plain):
