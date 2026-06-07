@@ -1,6 +1,6 @@
 name: astrbot_plugin_pymchat
 display_name: PymChat 适配器
-version: "1.0.0"
+version: "v1.0.0"
 short_desc: PymChat 平台适配器
 desc: 将 PymChat 接入 AstrBot
 author: 叹号大帝

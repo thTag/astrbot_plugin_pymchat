@@ -12,7 +12,7 @@ from astrbot.api.event import filter, AstrMessageEvent
     "astrbot_plugin_pymchat",
     "叹号大帝",
     "PymChat 聊天室插件（纯插件模式，支持自定义人设、自动获取昵称）",
-    "1.0.0",
+    "v1.0.0",
     "https://github.com/thTag/astrbot_plugin_pymchat"
 )
 class PymChatPlugin(Star):
@@ -37,7 +37,7 @@ class PymChatPlugin(Star):
         self.sync_bot_name = config.get("sync_bot_name", False)
         
         # 运行时变量
-        self.bot_name = self.configured_bot_name  # 实际生效的昵称
+        self.bot_name = self.configured_bot_name
         self.api_key = None
         self.session: Optional[aiohttp.ClientSession] = None
         self._running = False
@@ -57,7 +57,6 @@ class PymChatPlugin(Star):
             await self.session.close()
             return
         
-        # 登录成功后自动获取昵称（如果开启）
         await self._fetch_and_apply_nickname()
         
         self._running = True
@@ -72,20 +71,15 @@ class PymChatPlugin(Star):
             await self.session.close()
         logger.info("[PymChat] 插件已卸载")
     
-    # ==================== 控制指令 ====================
+    # ==================== 控制指令（修正版） ====================
     @filter.command("pymchat")
     async def command_status(self, event: AstrMessageEvent):
-        # 兼容不同的消息对象获取参数的方式
-        if hasattr(event, 'message_str'):
-            args = event.message_str.split()
-        elif hasattr(event, 'get_args'):
-            args = event.get_args()
-        else:
-            args = []
+        # 获取参数列表（标准方法）
+        args = event.get_args()
         
-        if len(args) > 1:
-            cmd = args[1].lower()
-            if cmd == "reload":
+        if args:
+            subcmd = args[0].lower()
+            if subcmd == "reload":
                 self.api_key = None
                 if await self._login():
                     await self._fetch_and_apply_nickname()
@@ -93,7 +87,7 @@ class PymChatPlugin(Star):
                 else:
                     yield event.plain_result("❌ 重新登录失败，请检查用户名密码")
                 return
-            elif cmd == "sync_nickname":
+            elif subcmd == "sync_nickname":
                 if not self.api_key:
                     yield event.plain_result("❌ 未登录，请先使用 /pymchat reload")
                     return
@@ -102,22 +96,22 @@ class PymChatPlugin(Star):
                 else:
                     yield event.plain_result("❌ 昵称同步失败")
                 return
-            elif cmd == "update_nickname":
+            elif subcmd == "update_nickname":
                 if not self.api_key:
                     yield event.plain_result("❌ 未登录，请先使用 /pymchat reload")
                     return
                 new_nick = self.configured_bot_name
                 if await self._update_nickname_on_pymchat(new_nick):
                     self.bot_name = new_nick
-                    yield event.plain_result(f"✅ 已向 PymChat 提交昵称更新请求，新昵称: {new_nick}")
+                    yield event.plain_result(f"✅ 已向 PymChat 提交昵称更新，新昵称: {new_nick}")
                 else:
                     yield event.plain_result("❌ 更新昵称失败，请检查昵称长度（2-20字符）或 API Key")
                 return
             else:
-                yield event.plain_result("未知指令。可用指令: /pymchat reload, sync_nickname, update_nickname")
+                yield event.plain_result(f"未知子命令: {subcmd}\n可用: reload, sync_nickname, update_nickname")
                 return
         
-        # 默认显示状态
+        # 无子命令，显示状态
         nickname_source = "自动获取" if (self.auto_fetch_nickname and self.bot_name != self.configured_bot_name) else "用户配置"
         yield event.plain_result(
             f"PymChat 插件状态\n"
@@ -128,7 +122,7 @@ class PymChatPlugin(Star):
             f"- 当前人设: {self.persona[:50]}..."
         )
     
-    # ==================== 核心功能 ====================
+    # ==================== 核心 API 交互 ====================
     async def _login(self) -> bool:
         login_data = {"username": self.username, "password": self.password}
         try:
@@ -212,6 +206,7 @@ class PymChatPlugin(Star):
             self.bot_name = self.configured_bot_name
             return False
     
+    # ==================== 消息轮询与处理 ====================
     async def _poll_messages(self):
         consecutive_errors = 0
         while self._running:
