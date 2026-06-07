@@ -2,12 +2,12 @@ import asyncio
 import json
 import os
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, List, Optional
 
 import aiohttp
-from astrbot.api.all import *
 from astrbot.api import logger
-from astrbot.api.message_components import *
+from astrbot.api.star import Context, Star, register  # 关键：导入 Star 和 register
+from astrbot.api.event import AstrMessageEvent, filter
 
 
 class PymChatClient:
@@ -15,7 +15,7 @@ class PymChatClient:
     BASE_URL = "https://chat.qplm.xyz/api/ac.php"
     LOGIN_URL = "https://chat.qplm.xyz/api/login.php"
     GROUP_BASE_URL = "https://chat.qplm.xyz/qunliao/api.php"
-    
+
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key
         self.user_id: Optional[str] = None
@@ -231,7 +231,7 @@ class PymChatClient:
 
 
 @register("pymchat", "Your Name", "PymChat 聊天室插件，支持公共聊天室、私聊、好友系统、群聊", "1.1.0", "https://github.com/yourusername/astrbot_plugin_pymchat")
-class PymChatPlugin(Plugin):
+class PymChatPlugin(Star):      # 关键修正：继承 Star 而不是 Plugin
     def __init__(self, context: Context):
         super().__init__(context)
         self.config = self._load_config()
@@ -371,12 +371,9 @@ class PymChatPlugin(Plugin):
             logger.error("发送回复失败")
 
     # ------------------- 命令 -------------------
-    @command_group("pymchat")
-    def pymchat(self):
-        pass
-
-    @pymchat.command("status")
-    async def status_cmd(self, event: AstrMessageEvent):
+    @filter.command("pymchat")
+    async def pymchat(self, event: AstrMessageEvent):
+        """查看 PymChat 插件状态"""
         status_lines = [
             "📊 **PymChat 状态**",
             f"👤 机器人昵称: {self.bot_name or '未设置'}",
@@ -391,8 +388,9 @@ class PymChatPlugin(Plugin):
         ]
         yield event.plain_result("\n".join(status_lines))
 
-    @pymchat.command("sync_nickname")
+    @filter.command("pymchat_sync")
     async def sync_nickname(self, event: AstrMessageEvent):
+        """同步昵称到 AstrBot"""
         if not self.client:
             yield event.plain_result("❌ 客户端未初始化")
             return
@@ -403,8 +401,9 @@ class PymChatPlugin(Plugin):
         else:
             yield event.plain_result("❌ 同步失败，请检查 API 连接")
 
-    @pymchat.command("send_public")
+    @filter.command("pymchat_send")
     async def send_public(self, event: AstrMessageEvent, *content):
+        """手动发送公共消息：/pymchat_send <消息内容>"""
         message = " ".join(content)
         if not message:
             yield event.plain_result("消息内容不能为空")
@@ -418,88 +417,8 @@ class PymChatPlugin(Plugin):
         else:
             yield event.plain_result("❌ 发送失败")
 
-    @pymchat.command("send_private")
-    async def send_private(self, event: AstrMessageEvent, user_id: str, *content):
-        if not self.enable_private_chat:
-            yield event.plain_result("私聊功能未启用")
-            return
-        message = " ".join(content)
-        if not message:
-            yield event.plain_result("消息内容不能为空")
-            return
-        if len(message) > self.max_message_length:
-            yield event.plain_result(f"消息过长，最大 {self.max_message_length} 字符")
-            return
-        success = await self.client.send_private_message(message, user_id)
-        if success:
-            yield event.plain_result(f"✅ 私信已发送给用户 {user_id}")
-        else:
-            yield event.plain_result("❌ 发送失败，请检查用户ID或是否为好友")
-
-    @pymchat.command("friends")
-    async def list_friends(self, event: AstrMessageEvent):
-        friends = await self.client.get_friends()
-        if not friends:
-            yield event.plain_result("暂无好友")
-            return
-        lines = ["👥 **好友列表**"]
-        for f in friends:
-            name = f.get("display_name") or f.get("username")
-            lines.append(f"- {name} (ID: {f.get('user_id')})")
-        yield event.plain_result("\n".join(lines))
-
-    @pymchat.command("add_friend")
-    async def add_friend_cmd(self, event: AstrMessageEvent, user_id: str, *message):
-        msg = " ".join(message) if message else "你好，我是机器人，请求添加好友。"
-        success = await self.client.add_friend(user_id, msg)
-        if success:
-            yield event.plain_result(f"✅ 好友申请已发送给用户 {user_id}")
-        else:
-            yield event.plain_result("❌ 发送好友申请失败")
-
-    @pymchat.command("friend_requests")
-    async def friend_requests(self, event: AstrMessageEvent):
-        requests = await self.client.get_friend_requests()
-        if not requests:
-            yield event.plain_result("暂无好友申请")
-            return
-        lines = ["📨 **好友申请列表**"]
-        for req in requests:
-            lines.append(f"- 来自 {req.get('from_user_name')} (ID: {req.get('from_user_id')})，申请ID: {req.get('request_id')}")
-        yield event.plain_result("\n".join(lines))
-
-    @pymchat.command("accept_friend")
-    async def accept_friend_cmd(self, event: AstrMessageEvent, request_id: str):
-        success = await self.client.accept_friend(request_id)
-        if success:
-            yield event.plain_result("✅ 已同意好友申请")
-        else:
-            yield event.plain_result("❌ 操作失败")
-
-    @pymchat.command("delete_friend")
-    async def delete_friend_cmd(self, event: AstrMessageEvent, friend_id: str):
-        success = await self.client.delete_friend(friend_id)
-        if success:
-            yield event.plain_result("✅ 已删除好友")
-        else:
-            yield event.plain_result("❌ 删除失败")
-
-    @pymchat.command("group")
-    async def group_chat(self, event: AstrMessageEvent, group_id: str, *content):
-        if not self.enable_group_chat:
-            yield event.plain_result("群聊功能未启用")
-            return
-        message = " ".join(content)
-        if not message:
-            yield event.plain_result("消息内容不能为空")
-            return
-        success = await self.client.send_group_message(message, group_id)
-        if success:
-            yield event.plain_result(f"✅ 群消息已发送至 {group_id}")
-        else:
-            yield event.plain_result("❌ 发送失败")
-
     async def terminate(self):
+        """可选择实现 terminate 函数，当插件被卸载/停用时会调用"""
         self.running = False
         if self.poll_task:
             self.poll_task.cancel()
