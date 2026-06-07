@@ -1,63 +1,64 @@
 {
     "username": {
         "type": "string",
-        "required": true,
-        "description": "PymChat 登录用户名"
+        "description": "PymChat 登录用户名",
+        "hint": "注册时的用户名"
     },
     "password": {
         "type": "string",
-        "required": true,
         "description": "PymChat 登录密码",
-        "obvious_hint": true
+        "hint": "密码将以加密形式存储"
+    },
+    "api_key": {
+        "type": "string",
+        "description": "API 密钥（可选）",
+        "hint": "如已获取 API 密钥可直接填写，否则插件将自动登录获取"
     },
     "bot_name": {
         "type": "string",
-        "default": "bot",
-        "description": "机器人昵称（当 auto_fetch_nickname 关闭时生效）"
+        "description": "机器人昵称",
+        "hint": "用于识别 @ 机器人消息，不填则自动获取"
     },
-    "trigger_keyword": {
+    "trigger_keywords": {
         "type": "string",
-        "default": "th",
-        "description": "触发 AI 回复的关键词"
+        "description": "触发关键词",
+        "default": "bot",
+        "hint": "多个关键词用英文逗号分隔，例如 bot,ai,小助手"
+    },
+    "system_prompt": {
+        "type": "text",
+        "description": "系统提示词",
+        "default": "你是一个友好的 AI 助手，请用中文回答问题。",
+        "hint": "设定 AI 的人设和行为"
     },
     "poll_interval": {
         "type": "int",
+        "description": "消息轮询间隔",
         "default": 3,
-        "description": "消息轮询间隔（秒）"
+        "hint": "单位：秒。建议不低于 3 秒，避免触发频率限制"
     },
-    "enable_llm_reply": {
+    "auto_reconnect": {
         "type": "bool",
+        "description": "自动重连",
         "default": true,
-        "description": "是否启用 LLM 自动回复"
+        "hint": "连接断开时自动重连"
     },
-    "persona": {
-        "type": "string",
-        "default": "你是一个友好、乐于助人的机器人助手。",
-        "description": "机器人的人设/身份描述"
-    },
-    "auto_fetch_nickname": {
+    "enable_private_chat": {
         "type": "bool",
+        "description": "启用私聊功能",
         "default": true,
-        "description": "是否自动从服务器获取当前账号昵称作为 bot_name"
+        "hint": "是否响应私聊消息（需额外开发）"
     },
-    "sync_bot_name": {
+    "enable_group_chat": {
         "type": "bool",
+        "description": "启用群聊功能",
         "default": false,
-        "description": "是否将本地 bot_name 的修改同步到 PymChat 个人资料"
+        "hint": "是否响应群聊消息（实验性功能）"
     },
-    "api_base": {
-        "type": "string",
-        "default": "https://chat.qplm.xyz/api/ac.php",
-        "description": "PymChat API 地址"
-    },
-    "login_url": {
-        "type": "string",
-        "default": "https://chat.qplm.xyz/api/login.php",
-        "description": "PymChat 登录接口地址"
-    },
-    "browser_id": {
-        "type": "string",
-        "default": "astrbot_pymchat",
-        "description": "浏览器标识"
+    "max_message_length": {
+        "type": "int",
+        "description": "最大消息长度",
+        "default": 500,
+        "hint": "PymChat API 限制最大 500 字符"
     }
 }
