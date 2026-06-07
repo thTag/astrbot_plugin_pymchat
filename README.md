@@ -100,7 +100,7 @@ th 你好
 
 - AstrBot >= v4.20（`AstrBotConfig` 配置机制）
 - Python >= 3.12
-- LLM 提供者已在 AstrBot 中配置（OpenAI / 智谱 / Ollama 等）
+- 已配置的 LLM 供应商
 
 ---
 
@@ -145,10 +145,10 @@ th 你好
 
 ### 📄 许可证
 
-本项目采用 MIT 许可证，详见 `LICENSE` 文件。
+[LICENSE](LICENSE)
 
 ---
 
 <p align="center">
-  Made with ❤️ for the AstrBot Community
+  Made with ❤️ thTag by th-dd
 </p>
