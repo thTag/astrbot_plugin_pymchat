@@ -1,6 +1,7 @@
+# 修改后的 main.py
 from astrbot.api.star import Context, Star, register
+from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api import logger
-from astrbot.core.star.star_handler import star_handlers_handler
 from .adapter.adapter import PymChatAdapter
 
 @register(
@@ -14,6 +15,7 @@ class PymChatPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context, config)
         self.adapter = None
+        self._adapter_instance = None
 
     async def on_load(self):
         """插件加载时注册平台适配器"""
@@ -26,33 +28,40 @@ class PymChatPlugin(Star):
 
     async def on_unload(self):
         """插件卸载时清理"""
-        if self.adapter:
-            await self.adapter.stop()
+        if self._adapter_instance:
+            await self._adapter_instance.stop()
         logger.info("[PymChat] 插件已卸载")
 
-    @star_handlers_handler.command("pc")
-    async def control_pymchat(self, event):
+    # ✅ 修正控制指令
+    @filter.command("pc")
+    async def control_pymchat(self, event: AstrMessageEvent):
         """控制 PymChat 适配器（指令已改为 pc）
         用法：
         /pc status   - 查看适配器状态
         /pc reload   - 重新登录获取API Key
         """
+        # 获取插件配置并初始化适配器实例（如果尚未初始化）
+        if not self._adapter_instance:
+            config = self.get_star_config()
+            self._adapter_instance = PymChatAdapter(config)
+            await self._adapter_instance.start()
+
         args = event.get_args()
         if not args:
-            yield event.reply("用法：/pc status 或 /pc reload")
+            yield event.plain_result("用法：/pc status 或 /pc reload")
             return
         cmd = args[0].lower()
         if cmd == "status":
-            if self.adapter and self.adapter._running:
-                yield event.reply("✅ PymChat 适配器运行中")
+            if self._adapter_instance and self._adapter_instance._running:
+                yield event.plain_result("✅ PymChat 适配器运行中")
             else:
-                yield event.reply("❌ PymChat 适配器未运行")
+                yield event.plain_result("❌ PymChat 适配器未运行")
         elif cmd == "reload":
-            if self.adapter:
-                self.adapter.api_key = None
-                await self.adapter._ensure_valid_api_key()
-                yield event.reply("✅ 已重新登录，API Key已刷新")
+            if self._adapter_instance:
+                self._adapter_instance.api_key = None
+                await self._adapter_instance._ensure_valid_api_key()
+                yield event.plain_result("✅ 已重新登录，API Key已刷新")
             else:
-                yield event.reply("❌ 适配器未初始化")
+                yield event.plain_result("❌ 适配器未初始化")
         else:
-            yield event.reply(f"未知命令: {cmd}")
+            yield event.plain_result(f"未知命令: {cmd}")
