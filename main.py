@@ -1,7 +1,7 @@
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.core.star.star_handler import star_handlers_handler
-from .adapter.pymchat_adapter import PymChatAdapter
+from .adapter.adapter import PymChatAdapter
 
 @register(
     "astrbot_plugin_pymchat",
@@ -30,15 +30,16 @@ class PymChatPlugin(Star):
             await self.adapter.stop()
         logger.info("[PymChat] 插件已卸载")
 
-    @star_handlers_handler.command("pymchat")
+    @star_handlers_handler.command("pc")
     async def control_pymchat(self, event):
-        """控制 PymChat 适配器
+        """控制 PymChat 适配器（指令已改为 pc）
         用法：
-        /pymchat status   - 查看适配器状态
+        /pc status   - 查看适配器状态
+        /pc reload   - 重新登录获取API Key
         """
         args = event.get_args()
         if not args:
-            yield event.reply("用法：/pymchat status")
+            yield event.reply("用法：/pc status 或 /pc reload")
             return
         cmd = args[0].lower()
         if cmd == "status":
@@ -46,5 +47,12 @@ class PymChatPlugin(Star):
                 yield event.reply("✅ PymChat 适配器运行中")
             else:
                 yield event.reply("❌ PymChat 适配器未运行")
+        elif cmd == "reload":
+            if self.adapter:
+                self.adapter.api_key = None
+                await self.adapter._ensure_valid_api_key()
+                yield event.reply("✅ 已重新登录，API Key已刷新")
+            else:
+                yield event.reply("❌ 适配器未初始化")
         else:
             yield event.reply(f"未知命令: {cmd}")
