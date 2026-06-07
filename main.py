@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import time
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Any
 
 import aiohttp
 from astrbot.api import logger
@@ -10,8 +10,17 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api.event import AstrMessageEvent, filter
 
 
+class APIError(Exception):
+    """自定义 API 异常，包含错误码和信息"""
+    def __init__(self, code: int, message: str, http_status: int = 401):
+        self.code = code
+        self.message = message
+        self.http_status = http_status
+        super().__init__(f"[{code}] {message}")
+
+
 class PymChatClient:
-    """PymChat API 客户端封装"""
+    """PymChat API 客户端封装，支持调试模式"""
     BASE_URL = "https://chat.qplm.xyz/api/ac.php"
     LOGIN_URL = "https://chat.qplm.xyz/api/login.php"
     GROUP_BASE_URL = "https://chat.qplm.xyz/qunliao/api.php"
@@ -32,13 +41,11 @@ class PymChatClient:
         if self.session:
             await self.session.close()
 
-    async def _request(self, method: str, url: str, params: dict = None, data: dict = None) -> Optional[dict]:
-        # 过滤掉值为 None 的参数，避免 aiohttp 报错
-        if params:
-            params = {k: v for k, v in params.items() if v is not None}
-        if data:
-            data = {k: v for k, v in data.items() if v is not None}
-
+    async def _request(self, method: str, url: str, params: dict = None, data: dict = None) -> Tuple[bool, Optional[dict], Optional[APIError]]:
+        """
+        统一请求处理
+        返回: (成功标志, 数据字典/None, 错误对象/None)
+        """
         if self.debug:
             logger.debug(f"[PymChat] 请求: {method} {url}")
             logger.debug(f"[PymChat] 参数: {params}")
@@ -52,47 +59,61 @@ class PymChatClient:
                     logger.debug(f"[PymChat] 响应状态: {resp.status}")
                     logger.debug(f"[PymChat] 响应内容: {result}")
 
+                # 处理速率限制
                 if resp.status == 429:
                     logger.warning("触发速率限制 (429)，等待 150 秒")
                     await asyncio.sleep(150)
-                    return {"error": True, "code": 429, "message": "Rate limited"}
-                if result.get("status") == 200:
-                    return result.get("data") or result
-                else:
+                    return False, None, APIError(429, "触发速率限制，请稍后再试", 429)
+
+                # 处理业务错误 (status 字段不为 200)
+                if result.get("status") != 200:
                     error_code = result.get("code", resp.status)
                     error_msg = result.get("message", result.get("error", "未知错误"))
                     logger.error(f"API 错误 (code={error_code}): {error_msg}")
-                    return {"error": True, "code": error_code, "message": error_msg}
+                    return False, None, APIError(error_code, error_msg, resp.status)
+
+                # 成功
+                return True, result.get("data") or result, None
+
+        except aiohttp.ClientError as e:
+            logger.error(f"网络请求异常: {e}")
+            if self.debug:
+                logger.exception("详细网络错误:")
+            return False, None, APIError(0, f"网络错误: {str(e)}", 0)
         except Exception as e:
             logger.error(f"请求异常: {e}")
             if self.debug:
                 logger.exception("详细错误堆栈:")
-            return {"error": True, "code": -1, "message": str(e)}
+            return False, None, APIError(0, f"内部错误: {str(e)}", 0)
 
-    async def login(self, username: str, password: str) -> bool:
+    async def login(self, username: str, password: str) -> Tuple[bool, Optional[str], Optional[APIError]]:
+        """登录获取 api_key"""
         data = {"username": username, "password": password}
         if self.debug:
             logger.debug(f"[PymChat] 尝试登录: username={username}")
+
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.post(self.LOGIN_URL, json=data) as resp:
                     result = await resp.json()
                     if self.debug:
                         logger.debug(f"[PymChat] 登录响应: {result}")
+
                     if result.get("status") == 200:
                         self.api_key = result["data"]["api_key"]
                         self.user_id = result["data"].get("user_id")
                         logger.info(f"登录成功，用户ID: {self.user_id}")
-                        return True
+                        return True, self.api_key, None
                     else:
+                        error_code = result.get("code", resp.status)
                         error_msg = result.get("message", "登录失败")
-                        logger.error(f"登录失败: {error_msg}")
-                        return False
+                        logger.error(f"登录失败: {error_msg} (code={error_code})")
+                        return False, None, APIError(error_code, error_msg, resp.status)
             except Exception as e:
                 logger.error(f"登录异常: {e}")
                 if self.debug:
                     logger.exception("登录详细错误:")
-                return False
+                return False, None, APIError(0, f"登录异常: {str(e)}", 0)
 
     async def ensure_session(self):
         if self.session is None or self.session.closed:
@@ -100,11 +121,11 @@ class PymChatClient:
             if self.debug:
                 logger.debug("[PymChat] 创建新的 HTTP 会话")
 
-    async def _get(self, params: dict) -> Optional[dict]:
+    async def _get(self, params: dict) -> Tuple[bool, Optional[dict], Optional[APIError]]:
         await self.ensure_session()
         return await self._request("GET", self.BASE_URL, params=params)
 
-    async def _post(self, params: dict) -> Union[bool, dict]:
+    async def _post(self, params: dict) -> Tuple[bool, Optional[dict], Optional[APIError]]:
         await self.ensure_session()
         now = time.time()
         if now - self.last_message_time < self.min_interval:
@@ -112,33 +133,31 @@ class PymChatClient:
             if self.debug:
                 logger.debug(f"[PymChat] 速率限制，等待 {wait:.2f} 秒")
             await asyncio.sleep(wait)
-        result = await self._request("POST", self.BASE_URL, params=params)
+        success, data, error = await self._request("POST", self.BASE_URL, params=params)
         self.last_message_time = time.time()
-        # 如果结果是错误字典，返回它；否则返回 bool (True 表示成功)
-        if isinstance(result, dict) and result.get("error"):
-            return result
-        return result is not None
+        return success, data, error
 
     # ------------------- 公共消息 -------------------
-    async def get_public_messages(self, limit: int = 20, last_id: Optional[str] = None) -> List[Dict]:
+    async def get_public_messages(self, limit: int = 20, last_id: Optional[str] = None) -> Tuple[bool, List[Dict], Optional[APIError]]:
         params = {
             "api_key": self.api_key,
             "action": "get_messages",
             "type": "public",
-            "limit": limit,
-            "last_id": last_id
+            "limit": limit
         }
-        if self.debug:
-            logger.debug(f"[PymChat] 获取公共消息，last_id={last_id}")
-        data = await self._get(params)
-        if isinstance(data, dict) and data.get("error"):
-            logger.error(f"获取公共消息错误: {data.get('message')}")
-            return []
-        if data and "messages" in data:
-            return data["messages"]
-        return []
+        if last_id:
+            params["last_id"] = last_id
+            if self.debug:
+                logger.debug(f"[PymChat] 获取公共消息，last_id={last_id}")
+        success, data, error = await self._get(params)
+        if success and data and "messages" in data:
+            return True, data["messages"], None
+        elif success:
+            return True, [], None
+        else:
+            return False, [], error
 
-    async def send_public_message(self, content: str) -> bool:
+    async def send_public_message(self, content: str) -> Tuple[bool, Optional[APIError]]:
         if self.debug:
             logger.debug(f"[PymChat] 发送公共消息: {content[:50]}...")
         params = {
@@ -147,14 +166,11 @@ class PymChatClient:
             "content": content,
             "recipient_id": "all"
         }
-        result = await self._post(params)
-        if isinstance(result, dict) and result.get("error"):
-            logger.error(f"发送公共消息失败: {result.get('message')}")
-            return False
-        return result
+        success, _, error = await self._post(params)
+        return success, error
 
     # ------------------- 私聊 -------------------
-    async def send_private_message(self, content: str, recipient_id: str) -> bool:
+    async def send_private_message(self, content: str, recipient_id: str) -> Tuple[bool, Optional[APIError]]:
         if self.debug:
             logger.debug(f"[PymChat] 发送私信给 {recipient_id}: {content[:50]}...")
         params = {
@@ -163,32 +179,30 @@ class PymChatClient:
             "content": content,
             "recipient_id": recipient_id
         }
-        result = await self._post(params)
-        if isinstance(result, dict) and result.get("error"):
-            logger.error(f"发送私信失败: {result.get('message')}")
-            return False
-        return result
+        success, _, error = await self._post(params)
+        return success, error
 
-    async def get_private_messages(self, with_user_id: str = None, limit: int = 20) -> List[Dict]:
+    async def get_private_messages(self, with_user_id: str = None, limit: int = 20) -> Tuple[bool, List[Dict], Optional[APIError]]:
         params = {
             "api_key": self.api_key,
             "action": "get_messages",
             "type": "private",
-            "limit": limit,
-            "with_user_id": with_user_id
+            "limit": limit
         }
-        if self.debug:
-            logger.debug(f"[PymChat] 获取与 {with_user_id} 的私聊消息")
-        data = await self._get(params)
-        if isinstance(data, dict) and data.get("error"):
-            logger.error(f"获取私聊消息错误: {data.get('message')}")
-            return []
-        if data and "messages" in data:
-            return data["messages"]
-        return []
+        if with_user_id:
+            params["with_user_id"] = with_user_id
+            if self.debug:
+                logger.debug(f"[PymChat] 获取与 {with_user_id} 的私聊消息")
+        success, data, error = await self._get(params)
+        if success and data and "messages" in data:
+            return True, data["messages"], None
+        elif success:
+            return True, [], None
+        else:
+            return False, [], error
 
     # ------------------- 好友系统 -------------------
-    async def get_friends(self, page: int = 1, per_page: int = 100) -> List[Dict]:
+    async def get_friends(self, page: int = 1, per_page: int = 100) -> Tuple[bool, List[Dict], Optional[APIError]]:
         params = {
             "api_key": self.api_key,
             "action": "get_friends",
@@ -197,15 +211,15 @@ class PymChatClient:
         }
         if self.debug:
             logger.debug(f"[PymChat] 获取好友列表，page={page}")
-        data = await self._get(params)
-        if isinstance(data, dict) and data.get("error"):
-            logger.error(f"获取好友列表错误: {data.get('message')}")
-            return []
-        if data and "friends" in data:
-            return data["friends"]
-        return []
+        success, data, error = await self._get(params)
+        if success and data and "friends" in data:
+            return True, data["friends"], None
+        elif success:
+            return True, [], None
+        else:
+            return False, [], error
 
-    async def add_friend(self, user_id: str, message: str = "") -> bool:
+    async def add_friend(self, user_id: str, message: str = "") -> Tuple[bool, Optional[APIError]]:
         if self.debug:
             logger.debug(f"[PymChat] 发送好友申请给 {user_id}, 附加消息: {message}")
         params = {
@@ -214,13 +228,10 @@ class PymChatClient:
             "user_id": user_id,
             "message": message
         }
-        result = await self._post(params)
-        if isinstance(result, dict) and result.get("error"):
-            logger.error(f"添加好友失败: {result.get('message')}")
-            return False
-        return result
+        success, _, error = await self._post(params)
+        return success, error
 
-    async def accept_friend(self, request_id: str) -> bool:
+    async def accept_friend(self, request_id: str) -> Tuple[bool, Optional[APIError]]:
         if self.debug:
             logger.debug(f"[PymChat] 同意好友申请: {request_id}")
         params = {
@@ -228,13 +239,10 @@ class PymChatClient:
             "action": "accept_friend",
             "request_id": request_id
         }
-        result = await self._post(params)
-        if isinstance(result, dict) and result.get("error"):
-            logger.error(f"同意好友申请失败: {result.get('message')}")
-            return False
-        return result
+        success, _, error = await self._post(params)
+        return success, error
 
-    async def delete_friend(self, friend_id: str) -> bool:
+    async def delete_friend(self, friend_id: str) -> Tuple[bool, Optional[APIError]]:
         if self.debug:
             logger.debug(f"[PymChat] 删除好友: {friend_id}")
         params = {
@@ -242,27 +250,24 @@ class PymChatClient:
             "action": "delete_friend",
             "friend_id": friend_id
         }
-        result = await self._post(params)
-        if isinstance(result, dict) and result.get("error"):
-            logger.error(f"删除好友失败: {result.get('message')}")
-            return False
-        return result
+        success, _, error = await self._post(params)
+        return success, error
 
-    async def get_friend_requests(self) -> List[Dict]:
+    async def get_friend_requests(self) -> Tuple[bool, List[Dict], Optional[APIError]]:
         params = {
             "api_key": self.api_key,
             "action": "get_friend_requests"
         }
-        data = await self._get(params)
-        if isinstance(data, dict) and data.get("error"):
-            logger.error(f"获取好友申请错误: {data.get('message')}")
-            return []
-        if data and "requests" in data:
-            return data["requests"]
-        return []
+        success, data, error = await self._get(params)
+        if success and data and "requests" in data:
+            return True, data["requests"], None
+        elif success:
+            return True, [], None
+        else:
+            return False, [], error
 
     # ------------------- 群聊 -------------------
-    async def get_group_messages(self, group_id: str, limit: int = 20) -> List[Dict]:
+    async def get_group_messages(self, group_id: str, limit: int = 20) -> Tuple[bool, List[Dict], Optional[APIError]]:
         params = {
             "api_key": self.api_key,
             "action": "get_messages",
@@ -270,13 +275,19 @@ class PymChatClient:
             "limit": limit
         }
         async with aiohttp.ClientSession() as session:
-            async with session.get(self.GROUP_BASE_URL, params=params) as resp:
-                result = await resp.json()
-                if result.get("status") == 200 and "messages" in result.get("data", {}):
-                    return result["data"]["messages"]
-                return []
+            try:
+                async with session.get(self.GROUP_BASE_URL, params=params) as resp:
+                    result = await resp.json()
+                    if result.get("status") == 200 and "messages" in result.get("data", {}):
+                        return True, result["data"]["messages"], None
+                    else:
+                        error_msg = result.get("message", "获取群消息失败")
+                        return False, [], APIError(result.get("code", resp.status), error_msg, resp.status)
+            except Exception as e:
+                logger.error(f"获取群消息异常: {e}")
+                return False, [], APIError(0, f"网络错误: {str(e)}", 0)
 
-    async def send_group_message(self, content: str, group_id: str) -> bool:
+    async def send_group_message(self, content: str, group_id: str) -> Tuple[bool, Optional[APIError]]:
         if self.debug:
             logger.debug(f"[PymChat] 发送群消息到 {group_id}: {content[:50]}...")
         params = {
@@ -292,39 +303,42 @@ class PymChatClient:
                 logger.debug(f"[PymChat] 群发速率限制，等待 {wait:.2f} 秒")
             await asyncio.sleep(wait)
         async with aiohttp.ClientSession() as session:
-            async with session.post(self.GROUP_BASE_URL, params=params) as resp:
-                self.last_message_time = time.time()
-                result = await resp.json()
-                return result.get("status") == 200
+            try:
+                async with session.post(self.GROUP_BASE_URL, params=params) as resp:
+                    self.last_message_time = time.time()
+                    result = await resp.json()
+                    if result.get("status") == 200:
+                        return True, None
+                    else:
+                        error_msg = result.get("message", "发送群消息失败")
+                        return False, APIError(result.get("code", resp.status), error_msg, resp.status)
+            except Exception as e:
+                logger.error(f"发送群消息异常: {e}")
+                return False, APIError(0, f"网络错误: {str(e)}", 0)
 
     # ------------------- 个人信息 -------------------
-    async def get_profile(self) -> Optional[Dict]:
+    async def get_profile(self) -> Tuple[bool, Optional[Dict], Optional[APIError]]:
         if self.debug:
             logger.debug("[PymChat] 获取个人信息")
         params = {
             "api_key": self.api_key,
             "action": "get_profile"
         }
-        result = await self._get(params)
-        if isinstance(result, dict) and result.get("error"):
-            logger.error(f"获取个人信息失败: {result.get('message')} (code={result.get('code')})")
-            return None
-        return result
+        return await self._get(params)
 
-    async def update_profile(self, display_name: str = None, bio: str = None) -> bool:
+    async def update_profile(self, display_name: str = None, bio: str = None) -> Tuple[bool, Optional[APIError]]:
         if self.debug:
             logger.debug(f"[PymChat] 更新个人信息: display_name={display_name}, bio={bio}")
         params = {
             "api_key": self.api_key,
-            "action": "update_profile",
-            "display_name": display_name,
-            "bio": bio
+            "action": "update_profile"
         }
-        result = await self._post(params)
-        if isinstance(result, dict) and result.get("error"):
-            logger.error(f"更新个人信息失败: {result.get('message')}")
-            return False
-        return result
+        if display_name:
+            params["display_name"] = display_name
+        if bio:
+            params["bio"] = bio
+        success, _, error = await self._post(params)
+        return success, error
 
 
 @register("pymchat", "Your Name", "PymChat 聊天室插件，支持公共聊天室、私聊、好友系统、群聊", "1.2.0", "https://github.com/yourusername/astrbot_plugin_pymchat")
@@ -373,30 +387,36 @@ class PymChatPlugin(Star):
     async def initialize(self):
         logger.info("PymChat 插件初始化中...")
         self.client = PymChatClient(api_key=self.api_key if self.api_key else None, debug=self.debug)
+
+        # 认证：优先使用 api_key，否则使用用户名密码登录
         if not self.client.api_key and self.username and self.password:
             logger.info("使用用户名密码登录获取 API Key...")
-            success = await self.client.login(self.username, self.password)
+            success, api_key, error = await self.client.login(self.username, self.password)
             if not success:
-                logger.error("PymChat 登录失败，插件将无法正常工作")
+                error_msg = f"登录失败: {error.message} (code={error.code})" if error else "登录失败"
+                logger.error(error_msg)
                 return
         elif self.client.api_key:
             logger.info("使用提供的 API Key 验证...")
-            profile = await self.client.get_profile()
-            if not profile:
-                logger.warning("提供的 api_key 无效，请检查配置")
+            # 验证 api_key 有效性
+            success, profile, error = await self.client.get_profile()
+            if not success:
+                error_msg = f"API Key 无效: {error.message} (code={error.code})" if error else "API Key 无效"
+                logger.error(error_msg)
                 return
-            self.client.user_id = profile.get("user_id")
+            self.client.user_id = profile.get("user_id") if profile else None
             if self.debug:
                 logger.debug(f"API Key 验证成功，用户ID: {self.client.user_id}")
         else:
             logger.error("未提供 api_key 或用户名密码，PymChat 插件无法启动")
             return
 
+        # 获取机器人昵称
         if self.bot_name_config:
             self.bot_name = self.bot_name_config
         else:
-            profile = await self.client.get_profile()
-            if profile:
+            success, profile, error = await self.client.get_profile()
+            if success and profile:
                 self.bot_name = profile.get("display_name") or profile.get("username")
             else:
                 self.bot_name = "Bot"
@@ -412,7 +432,14 @@ class PymChatPlugin(Star):
             try:
                 if self.debug:
                     logger.debug(f"[轮询] 获取消息，last_msg_id={self.last_msg_id}")
-                messages = await self.client.get_public_messages(limit=20, last_id=self.last_msg_id)
+                success, messages, error = await self.client.get_public_messages(limit=20, last_id=self.last_msg_id)
+                if not success:
+                    logger.error(f"轮询消息失败: {error.message if error else '未知错误'}")
+                    if self.auto_reconnect:
+                        await asyncio.sleep(5)
+                        continue
+                    else:
+                        break
                 if messages:
                     if self.debug:
                         logger.debug(f"[轮询] 获取到 {len(messages)} 条新消息")
@@ -458,6 +485,7 @@ class PymChatPlugin(Star):
     async def _handle_pymchat_message(self, msg: Dict):
         content = msg.get("content", "")
         sender_name = msg.get("display_name") or msg.get("username", "用户")
+        # 提取问题内容
         if content.startswith(f"@{self.bot_name}"):
             question = content[len(f"@{self.bot_name}"):].strip()
         else:
@@ -481,6 +509,7 @@ class PymChatPlugin(Star):
         if self.debug:
             logger.debug(f"[消息处理] 完整消息原始内容: {content}")
 
+        # 生成回复
         try:
             llm_provider = self.context.get_llm_provider()
             if llm_provider:
@@ -505,11 +534,11 @@ class PymChatPlugin(Star):
             if self.debug:
                 logger.debug(f"[消息处理] 回复被截断至 {self.max_message_length} 字符")
 
-        success = await self.client.send_public_message(reply_text)
+        success, error = await self.client.send_public_message(reply_text)
         if success:
             logger.info(f"已回复 {sender_name}: {reply_text[:100]}...")
         else:
-            logger.error("发送回复失败")
+            logger.error(f"发送回复失败: {error.message if error else '未知错误'}")
 
     # ------------------- 命令 -------------------
     @filter.command("pymchat")
@@ -538,15 +567,19 @@ class PymChatPlugin(Star):
             return
         if self.debug:
             logger.debug("[命令] 执行同步昵称")
-        profile = await self.client.get_profile()
-        if profile:
+        success, profile, error = await self.client.get_profile()
+        if success and profile:
             self.bot_name = profile.get("display_name") or profile.get("username")
             logger.info(f"昵称已同步: {self.bot_name}")
             yield event.plain_result(f"✅ 昵称已同步: {self.bot_name}")
         else:
-            # 此时 profile 为 None，但日志中已经有详细错误信息
-            # 我们从 client 最近的错误中获取信息？目前 client 没有存储最后错误，所以直接提示
-            yield event.plain_result("❌ 同步失败，请检查 API 连接。详细信息请查看日志输出中的错误码和消息。")
+            if error:
+                error_detail = f"错误码 {error.code}: {error.message}"
+                logger.error(f"同步昵称失败: {error_detail}")
+                yield event.plain_result(f"❌ 同步失败：{error_detail}")
+            else:
+                logger.error("同步昵称失败: 未知错误")
+                yield event.plain_result("❌ 同步失败，未知错误")
 
     @filter.command("pymchat_send")
     async def send_public(self, event: AstrMessageEvent, *content):
@@ -560,13 +593,14 @@ class PymChatPlugin(Star):
             return
         if self.debug:
             logger.debug(f"[命令] 发送公共消息: {message}")
-        success = await self.client.send_public_message(message)
+        success, error = await self.client.send_public_message(message)
         if success:
             logger.info(f"手动发送公共消息成功: {message[:50]}...")
             yield event.plain_result("✅ 公共消息已发送")
         else:
-            logger.error("手动发送公共消息失败")
-            yield event.plain_result("❌ 发送失败")
+            error_msg = f"发送失败: {error.message}" if error else "发送失败"
+            logger.error(error_msg)
+            yield event.plain_result(f"❌ {error_msg}")
 
     @filter.command("pymchat_send_private")
     async def send_private(self, event: AstrMessageEvent, user_id: str, *content):
@@ -583,20 +617,26 @@ class PymChatPlugin(Star):
             return
         if self.debug:
             logger.debug(f"[命令] 发送私信给 {user_id}: {message[:50]}...")
-        success = await self.client.send_private_message(message, user_id)
+        success, error = await self.client.send_private_message(message, user_id)
         if success:
             logger.info(f"私信已发送给 {user_id}: {message[:50]}...")
             yield event.plain_result(f"✅ 私信已发送给用户 {user_id}")
         else:
-            logger.error(f"发送私信给 {user_id} 失败")
-            yield event.plain_result("❌ 发送失败，请检查用户ID或是否为好友")
+            error_msg = f"发送失败: {error.message}" if error else "发送失败"
+            logger.error(error_msg)
+            yield event.plain_result(f"❌ {error_msg}")
 
     @filter.command("pymchat_friends")
     async def list_friends(self, event: AstrMessageEvent):
         """查看好友列表"""
         if self.debug:
             logger.debug("[命令] 获取好友列表")
-        friends = await self.client.get_friends()
+        success, friends, error = await self.client.get_friends()
+        if not success:
+            error_msg = f"获取好友列表失败: {error.message}" if error else "获取失败"
+            logger.error(error_msg)
+            yield event.plain_result(f"❌ {error_msg}")
+            return
         if not friends:
             yield event.plain_result("暂无好友")
             return
@@ -614,20 +654,26 @@ class PymChatPlugin(Star):
         msg = " ".join(message) if message else "你好，我是机器人，请求添加好友。"
         if self.debug:
             logger.debug(f"[命令] 发送好友申请给 {user_id}, 附加消息: {msg}")
-        success = await self.client.add_friend(user_id, msg)
+        success, error = await self.client.add_friend(user_id, msg)
         if success:
             logger.info(f"好友申请已发送给 {user_id}")
             yield event.plain_result(f"✅ 好友申请已发送给用户 {user_id}")
         else:
-            logger.error(f"发送好友申请给 {user_id} 失败")
-            yield event.plain_result("❌ 发送好友申请失败")
+            error_msg = f"发送好友申请失败: {error.message}" if error else "发送失败"
+            logger.error(error_msg)
+            yield event.plain_result(f"❌ {error_msg}")
 
     @filter.command("pymchat_friend_requests")
     async def friend_requests(self, event: AstrMessageEvent):
         """查看好友申请列表"""
         if self.debug:
             logger.debug("[命令] 获取好友申请列表")
-        requests = await self.client.get_friend_requests()
+        success, requests, error = await self.client.get_friend_requests()
+        if not success:
+            error_msg = f"获取好友申请失败: {error.message}" if error else "获取失败"
+            logger.error(error_msg)
+            yield event.plain_result(f"❌ {error_msg}")
+            return
         if not requests:
             yield event.plain_result("暂无好友申请")
             return
@@ -643,26 +689,28 @@ class PymChatPlugin(Star):
         """同意好友申请：/pymchat_accept_friend <申请ID>"""
         if self.debug:
             logger.debug(f"[命令] 同意好友申请: {request_id}")
-        success = await self.client.accept_friend(request_id)
+        success, error = await self.client.accept_friend(request_id)
         if success:
             logger.info(f"已同意好友申请: {request_id}")
             yield event.plain_result("✅ 已同意好友申请")
         else:
-            logger.error(f"同意好友申请 {request_id} 失败")
-            yield event.plain_result("❌ 操作失败")
+            error_msg = f"同意好友申请失败: {error.message}" if error else "操作失败"
+            logger.error(error_msg)
+            yield event.plain_result(f"❌ {error_msg}")
 
     @filter.command("pymchat_delete_friend")
     async def delete_friend_cmd(self, event: AstrMessageEvent, friend_id: str):
         """删除好友：/pymchat_delete_friend <好友ID>"""
         if self.debug:
             logger.debug(f"[命令] 删除好友: {friend_id}")
-        success = await self.client.delete_friend(friend_id)
+        success, error = await self.client.delete_friend(friend_id)
         if success:
             logger.info(f"已删除好友: {friend_id}")
             yield event.plain_result("✅ 已删除好友")
         else:
-            logger.error(f"删除好友 {friend_id} 失败")
-            yield event.plain_result("❌ 删除失败")
+            error_msg = f"删除好友失败: {error.message}" if error else "删除失败"
+            logger.error(error_msg)
+            yield event.plain_result(f"❌ {error_msg}")
 
     @filter.command("pymchat_group")
     async def group_chat(self, event: AstrMessageEvent, group_id: str, *content):
@@ -676,13 +724,14 @@ class PymChatPlugin(Star):
             return
         if self.debug:
             logger.debug(f"[命令] 发送群消息到 {group_id}: {message[:50]}...")
-        success = await self.client.send_group_message(message, group_id)
+        success, error = await self.client.send_group_message(message, group_id)
         if success:
             logger.info(f"群消息已发送至 {group_id}: {message[:50]}...")
             yield event.plain_result(f"✅ 群消息已发送至 {group_id}")
         else:
-            logger.error(f"发送群消息到 {group_id} 失败")
-            yield event.plain_result("❌ 发送失败")
+            error_msg = f"发送失败: {error.message}" if error else "发送失败"
+            logger.error(error_msg)
+            yield event.plain_result(f"❌ {error_msg}")
 
     @filter.command("pymchat_debug")
     async def toggle_debug(self, event: AstrMessageEvent, *args):
