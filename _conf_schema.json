@@ -13,12 +13,12 @@
     "bot_name": {
         "type": "string",
         "default": "bot",
-        "description": "机器人昵称，用于消息中的@检测"
+        "description": "机器人昵称，用于消息中的 @ 检测"
     },
     "trigger_keyword": {
         "type": "string",
         "default": "th",
-        "description": "触发AI回复的关键词"
+        "description": "触发 AI 回复的关键词"
     },
     "api_base": {
         "type": "string",
@@ -29,5 +29,10 @@
         "type": "int",
         "default": 3,
         "description": "消息轮询间隔（秒）"
+    },
+    "browser_id": {
+        "type": "string",
+        "default": "astrbot_pymchat",
+        "description": "浏览器标识"
     }
 }
