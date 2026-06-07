@@ -1,11 +1,9 @@
 import asyncio
-import json
-import os
 import time
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple
 
 import aiohttp
-from astrbot.api import logger
+from astrbot.api import logger, AstrBotConfig
 from astrbot.api.star import Context, Star, register
 from astrbot.api.event import AstrMessageEvent, filter
 
@@ -30,7 +28,6 @@ class PymChatClient:
         self.min_interval: float = 3.0
         self.session: Optional[aiohttp.ClientSession] = None
         self.debug = debug
-        self._auth_error: Optional[str] = None  # 记录认证错误
 
     async def __aenter__(self):
         self.session = aiohttp.ClientSession()
@@ -104,11 +101,11 @@ class PymChatClient:
                         error_code = result.get("code", resp.status)
                         error_msg = result.get("message", "登录失败")
                         logger.error(f"登录失败: {error_msg} (code={error_code})")
-                        self._auth_error = f"登录失败: {error_msg} (code={error_code})"
                         return False, None, APIError(error_code, error_msg, resp.status)
             except Exception as e:
                 logger.error(f"登录异常: {e}")
-                self._auth_error = f"登录异常: {str(e)}"
+                if self.debug:
+                    logger.exception("登录详细错误:")
                 return False, None, APIError(0, f"登录异常: {str(e)}", 0)
 
     async def ensure_session(self):
@@ -324,25 +321,24 @@ class PymChatClient:
 
 @register("pymchat", "Your Name", "PymChat 聊天室插件，支持公共聊天室、私聊、好友系统、群聊", "1.3.0", "https://github.com/yourusername/astrbot_plugin_pymchat")
 class PymChatPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-        self.config = {}
+        # 配置由框架自动注入，内容为 _conf_schema.json 定义的字段
+        self.config = config
         self.client: Optional[PymChatClient] = None
         self.bot_name: Optional[str] = None
         self.running: bool = False
         self.poll_task: Optional[asyncio.Task] = None
         self.last_msg_id: Optional[str] = None
-        self.init_error: Optional[str] = None  # 记录初始化错误
+        self.init_error: Optional[str] = None
 
-        # 先加载配置（不依赖框架）
-        self._load_config_from_file()
-
-        # 从配置中读取参数
+        # 从 config 中读取配置（支持字典方法）
         self.username = self.config.get("username", "")
         self.password = self.config.get("password", "")
         self.api_key = self.config.get("api_key", "")
         self.bot_name_config = self.config.get("bot_name", "")
-        self.trigger_keywords = [kw.strip() for kw in self.config.get("trigger_keywords", "bot").split(",")]
+        raw_keywords = self.config.get("trigger_keywords", "bot")
+        self.trigger_keywords = [kw.strip() for kw in raw_keywords.split(",")] if isinstance(raw_keywords, str) else ["bot"]
         self.system_prompt = self.config.get("system_prompt", "你是一个友好的 AI 助手，请用中文回答问题。")
         self.poll_interval = self.config.get("poll_interval", 3)
         self.auto_reconnect = self.config.get("auto_reconnect", True)
@@ -354,34 +350,8 @@ class PymChatPlugin(Star):
         logger.info(f"PymChat 插件初始化，调试模式: {'开启' if self.debug else '关闭'}")
         logger.info(f"配置摘要: username={self.username}, api_key={'已设置' if self.api_key else '未设置'}, trigger={self.trigger_keywords}")
 
-    def _load_config_from_file(self):
-        """直接从插件目录下的 config.json 加载配置（最可靠）"""
-        config_file = os.path.join(os.path.dirname(__file__), "config.json")
-        if os.path.exists(config_file):
-            try:
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    self.config = json.load(f)
-                logger.info(f"从本地文件加载配置成功: {config_file}")
-                logger.info(f"配置键: {list(self.config.keys())}")
-            except Exception as e:
-                logger.error(f"读取本地配置文件失败: {e}")
-                self.config = {}
-        else:
-            logger.warning(f"本地配置文件不存在: {config_file}")
-            self.config = {}
-
-        # 如果本地文件不存在，尝试从框架获取
-        if not self.config:
-            try:
-                framework_config = self.context.get_plugin_config()
-                if framework_config:
-                    self.config = framework_config
-                    logger.info("从框架获取配置成功")
-            except Exception as e:
-                logger.warning(f"从框架获取配置失败: {e}")
-
     async def _do_initialize(self):
-        """执行初始化的核心逻辑，可被 reload 命令调用"""
+        """执行认证和启动准备"""
         self.init_error = None
         logger.info("开始 PymChat 认证...")
         self.client = PymChatClient(api_key=self.api_key if self.api_key else None, debug=self.debug)
@@ -434,7 +404,6 @@ class PymChatPlugin(Star):
 
     async def initialize(self):
         """插件启动时的初始化"""
-        # 先尝试初始化
         success = await self._do_initialize()
         if success:
             self.running = True
@@ -593,13 +562,15 @@ class PymChatPlugin(Star):
         if self.client and self.client.session:
             await self.client.session.close()
 
-        # 重新加载配置
-        self._load_config_from_file()
+        # 从框架重新获取配置（注意：config 对象不会自动更新，需要重新读取）
+        # 但 AstrBotConfig 实例在插件生命周期内不会自动更新，所以这里直接使用 self.config 中的值已经是最新的
+        # 如果框架支持热更新，可以调用 self.config.load()，但为了可靠，重新从 self.config 读取配置值
         self.username = self.config.get("username", "")
         self.password = self.config.get("password", "")
         self.api_key = self.config.get("api_key", "")
         self.bot_name_config = self.config.get("bot_name", "")
-        self.trigger_keywords = [kw.strip() for kw in self.config.get("trigger_keywords", "bot").split(",")]
+        raw_keywords = self.config.get("trigger_keywords", "bot")
+        self.trigger_keywords = [kw.strip() for kw in raw_keywords.split(",")] if isinstance(raw_keywords, str) else ["bot"]
         self.system_prompt = self.config.get("system_prompt", "你是一个友好的 AI 助手，请用中文回答问题。")
         self.poll_interval = self.config.get("poll_interval", 3)
         self.auto_reconnect = self.config.get("auto_reconnect", True)
