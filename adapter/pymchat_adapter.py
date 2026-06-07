@@ -65,7 +65,9 @@ class PymChatAdapter(Platform):
             await self.session.close()
         logger.info("[PymChat] 适配器已停止")
 
-    async def send_by_session(self, session: MessageSession, message_chain: MessageChain):
+    async def send_by_session(
+        self, session: MessageSession, message_chain: MessageChain
+    ):
         """发送消息（AstrBot 调用此方法回复）"""
         content = self._extract_text(message_chain)
         if not content:
@@ -134,8 +136,18 @@ class PymChatAdapter(Platform):
                     if need_ai_reply:
                         # 清洗消息
                         clean = ab_msg.content
-                        clean = re.sub(rf"@{re.escape(self.bot_name)}", "", clean, flags=re.IGNORECASE)
-                        clean = re.sub(rf"\b{re.escape(self.trigger_keyword)}\b", "", clean, flags=re.IGNORECASE)
+                        clean = re.sub(
+                            rf"@{re.escape(self.bot_name)}",
+                            "",
+                            clean,
+                            flags=re.IGNORECASE,
+                        )
+                        clean = re.sub(
+                            rf"\b{re.escape(self.trigger_keyword)}\b",
+                            "",
+                            clean,
+                            flags=re.IGNORECASE,
+                        )
                         clean = re.sub(r"\s+", " ", clean).strip()
                         if clean:
                             ab_msg.content = clean
