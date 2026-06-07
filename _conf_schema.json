@@ -60,5 +60,11 @@
         "description": "最大消息长度",
         "default": 500,
         "hint": "PymChat API 限制最大 500 字符"
+    },
+    "debug_mode": {
+        "type": "bool",
+        "description": "调试模式",
+        "default": false,
+        "hint": "开启后将输出详细的请求/响应日志和调试信息"
     }
 }
