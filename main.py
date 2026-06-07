@@ -66,7 +66,11 @@ class PymChatPlugin(Star):
     @filter.command("pymchat")
     async def command_status(self, event: AstrMessageEvent):
         """查看 PymChat 插件状态"""
-        args = event.get_args()
+        # 解析参数：消息文本可能是 "/pymchat reload"
+        text = event.message_str
+        parts = text.strip().split()
+        args = parts[1:] if len(parts) > 1 else []
+        
         if args and args[0] == "reload":
             self.api_key = None
             if await self._login():
