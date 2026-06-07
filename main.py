@@ -71,15 +71,37 @@ class PymChatPlugin(Star):
             await self.session.close()
         logger.info("[PymChat] 插件已卸载")
     
-    # ==================== 控制指令（修正版） ====================
+    # ==================== 控制指令（含帮助） ====================
     @filter.command("pymchat")
     async def command_status(self, event: AstrMessageEvent):
-        # 获取参数列表（标准方法）
         args = event.get_args()
+        
+        # 帮助信息
+        help_text = (
+            "📖 PymChat 插件使用帮助\n\n"
+            "/pymchat             - 显示插件状态和本帮助\n"
+            "/pymchat help        - 显示详细帮助\n"
+            "/pymchat reload      - 重新登录并刷新 API Key\n"
+            "/pymchat sync_nickname - 从服务器同步最新昵称\n"
+            "/pymchat update_nickname - 将本地 bot_name 更新到服务器\n\n"
+            "🔔 触发条件：\n"
+            "   - 在 PymChat 公共聊天室发送 @机器人昵称 消息\n"
+            "   - 或发送包含关键词 'th' 的消息（可配置）\n\n"
+            "⚙️ 配置说明：\n"
+            "   在插件配置中可修改 trigger_keyword、persona、auto_fetch_nickname 等\n\n"
+            "📌 当前状态：\n"
+            f"   - 轮询: {'✅ 运行中' if self._running else '⏹️ 已停止'}\n"
+            f"   - Bot 昵称: {self.bot_name}\n"
+            f"   - 触发关键词: {self.trigger_keyword}\n"
+            f"   - 自动回复: {'开启' if self.enable_llm_reply else '关闭'}"
+        )
         
         if args:
             subcmd = args[0].lower()
-            if subcmd == "reload":
+            if subcmd == "help":
+                yield event.plain_result(help_text)
+                return
+            elif subcmd == "reload":
                 self.api_key = None
                 if await self._login():
                     await self._fetch_and_apply_nickname()
@@ -108,19 +130,21 @@ class PymChatPlugin(Star):
                     yield event.plain_result("❌ 更新昵称失败，请检查昵称长度（2-20字符）或 API Key")
                 return
             else:
-                yield event.plain_result(f"未知子命令: {subcmd}\n可用: reload, sync_nickname, update_nickname")
+                yield event.plain_result(f"❓ 未知子命令: {subcmd}\n使用 /pymchat help 查看帮助")
                 return
         
-        # 无子命令，显示状态
+        # 无参数：显示状态并提示查看帮助
         nickname_source = "自动获取" if (self.auto_fetch_nickname and self.bot_name != self.configured_bot_name) else "用户配置"
-        yield event.plain_result(
+        status_text = (
             f"PymChat 插件状态\n"
             f"- 轮询: {'✅ 运行中' if self._running else '⏹️ 已停止'}\n"
             f"- Bot 昵称: {self.bot_name} (来源: {nickname_source})\n"
             f"- 最后消息ID: {self._last_msg_id}\n"
             f"- 已处理消息数: {len(self._processed_ids)}\n"
-            f"- 当前人设: {self.persona[:50]}..."
+            f"- 当前人设: {self.persona[:50]}...\n\n"
+            f"💡 发送 /pymchat help 查看完整帮助"
         )
+        yield event.plain_result(status_text)
     
     # ==================== 核心 API 交互 ====================
     async def _login(self) -> bool:
