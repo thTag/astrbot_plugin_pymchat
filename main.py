@@ -1,6 +1,4 @@
 from astrbot.api.star import Star, Context, register
-from astrbot.api import logger
-from .adapter import PymChatAdapter
 
 @register(
     "astrbot_plugin_pymchat",
@@ -12,12 +10,11 @@ from .adapter import PymChatAdapter
 class PymChatPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context, config)
+        # 关键：导入适配器模块，触发 @register_platform_adapter 装饰器
+        from .adapter.pymchat_adapter import PymChatAdapter  # noqa: F401
 
     async def on_load(self):
-        # 手动注册适配器
-        platform_manager = self.context.get_platform_manager()
-        platform_manager.register_adapter("pymchat", PymChatAdapter)
-        logger.info("[PymChat] 手动注册适配器成功")
+        pass
 
     async def on_unload(self):
-        logger.info("[PymChat] 插件卸载")
+        pass
