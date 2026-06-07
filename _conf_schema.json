@@ -13,7 +13,7 @@
     "bot_name": {
         "type": "string",
         "default": "bot",
-        "description": "机器人昵称，用于 @ 检测"
+        "description": "机器人昵称（当 auto_fetch_nickname 关闭时生效）"
     },
     "trigger_keyword": {
         "type": "string",
@@ -33,6 +33,31 @@
     "persona": {
         "type": "string",
         "default": "你是一个友好、乐于助人的机器人助手。",
-        "description": "机器人的人设/身份描述，用于指导 AI 回复风格"
+        "description": "机器人的人设/身份描述"
+    },
+    "auto_fetch_nickname": {
+        "type": "bool",
+        "default": true,
+        "description": "是否自动从服务器获取当前账号昵称作为 bot_name"
+    },
+    "sync_bot_name": {
+        "type": "bool",
+        "default": false,
+        "description": "是否将本地 bot_name 的修改同步到 PymChat 个人资料"
+    },
+    "api_base": {
+        "type": "string",
+        "default": "https://chat.qplm.xyz/api/ac.php",
+        "description": "PymChat API 地址"
+    },
+    "login_url": {
+        "type": "string",
+        "default": "https://chat.qplm.xyz/api/login.php",
+        "description": "PymChat 登录接口地址"
+    },
+    "browser_id": {
+        "type": "string",
+        "default": "astrbot_pymchat",
+        "description": "浏览器标识"
     }
 }
