@@ -86,7 +86,7 @@ class PymChatAdapter(Platform):
             await self.session.close()
         logger.info("[PymChat] 适配器已停止")
 
-    async def send_by_session(self, session: MessageSesion, message_chain: MessageChain):
+    async def send_by_session(self, session: MessageSesion, message: AstrBotMessage):
         """发送消息（AstrBot 通过此方法回复）
         注意：在 PymChat 场景下，我们主要通过 LLM 工具的 send_to_chatroom 来发送，
         此方法保留以兼容框架调用。
