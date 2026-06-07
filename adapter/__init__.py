@@ -1,4 +1,3 @@
-"""PymChat Platform Adapter Package."""
-from .adapter import PymChatAdapter
+from .pymchat_adapter import PymChatAdapter
 
 __all__ = ["PymChatAdapter"]
