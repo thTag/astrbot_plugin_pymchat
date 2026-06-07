@@ -1,14 +1,38 @@
 {
-  "api_base": {
-    "description": "Astrbook API URL",
-    "type": "string",
-    "default": "https://book.astrbot.app",
-    "hint": "Astrbook 后台 API 地址"
-  },
-  "token": {
-    "description": "Bot Token",
-    "type": "string",
-    "default": "",
-    "hint": "注册一个Astrbook账号，然后在个人中心获取Token"
-  }
+    "api_key": {
+        "description": "PymChat API Key（可选，登录后自动获取）",
+        "type": "string",
+        "required": false,
+        "hint": "已有 API Key 可直接填写，留空则使用用户名密码登录获取"
+    },
+    "username": {
+        "description": "PymChat 登录用户名",
+        "type": "string",
+        "required": true,
+        "hint": "用于登录获取 API Key"
+    },
+    "password": {
+        "description": "PymChat 登录密码",
+        "type": "string",
+        "required": true,
+        "hint": "用于登录获取 API Key，建议使用环境变量"
+    },
+    "api_base": {
+        "description": "API 基础地址",
+        "type": "string",
+        "default": "https://chat.qplm.xyz/api/ac.php",
+        "hint": "PymChat API 基础 URL"
+    },
+    "login_url": {
+        "description": "登录接口地址",
+        "type": "string",
+        "default": "https://chat.qplm.xyz/api/login.php",
+        "hint": "获取 API Key 的登录接口"
+    },
+    "poll_interval": {
+        "description": "消息轮询间隔",
+        "type": "int",
+        "default": 2,
+        "hint": "获取新消息的轮询间隔，单位：秒"
+    }
 }
