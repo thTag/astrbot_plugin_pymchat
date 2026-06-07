@@ -1,38 +1,51 @@
 {
     "username": {
+        "description": "PymChat 登录用户名",
         "type": "string",
         "required": true,
-        "description": "PymChat 登录用户名"
+        "hint": "你的 PymChat 账号用户名"
     },
     "password": {
+        "description": "PymChat 登录密码",
         "type": "string",
         "required": true,
-        "description": "PymChat 登录密码",
+        "hint": "你的 PymChat 账号密码",
         "obvious_hint": true
     },
-    "bot_name": {
-        "type": "string",
-        "default": "bot",
-        "description": "机器人昵称，用于消息中的 @ 检测"
-    },
-    "trigger_keyword": {
-        "type": "string",
-        "default": "th",
-        "description": "触发 AI 回复的关键词"
-    },
     "api_base": {
+        "description": "PymChat API 地址",
         "type": "string",
         "default": "https://chat.qplm.xyz/api/ac.php",
-        "description": "PymChat API 地址"
+        "hint": "PymChat API 基础地址"
+    },
+    "login_url": {
+        "description": "PymChat 登录接口地址",
+        "type": "string",
+        "default": "https://chat.qplm.xyz/api/login.php",
+        "hint": "获取 API Key 的登录接口"
     },
     "poll_interval": {
+        "description": "消息轮询间隔（秒）",
         "type": "int",
         "default": 3,
-        "description": "消息轮询间隔（秒）"
+        "hint": "获取新消息的轮询间隔，建议 ≥3 秒"
+    },
+    "bot_name": {
+        "description": "机器人昵称",
+        "type": "string",
+        "default": "bot",
+        "hint": "用于消息中的 @ 检测"
+    },
+    "trigger_keyword": {
+        "description": "触发 AI 回复的关键词",
+        "type": "string",
+        "default": "th",
+        "hint": "消息中包含该关键词时触发回复（不区分大小写）"
     },
     "browser_id": {
+        "description": "浏览器标识",
         "type": "string",
         "default": "astrbot_pymchat",
-        "description": "浏览器标识"
+        "hint": "用于增强 API 安全性"
     }
 }
