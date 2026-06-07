@@ -29,5 +29,10 @@
         "type": "bool",
         "default": true,
         "description": "是否启用 LLM 自动回复"
+    },
+    "persona": {
+        "type": "string",
+        "default": "你是一个友好、乐于助人的机器人助手。",
+        "description": "机器人的人设/身份描述，用于指导 AI 回复风格"
     }
 }
