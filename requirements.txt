@@ -1,1 +1,2 @@
-aiohttp>=3.8.0
+# PymChat 适配器 for AstrBot
+# 无需额外依赖，使用系统 curl 命令
