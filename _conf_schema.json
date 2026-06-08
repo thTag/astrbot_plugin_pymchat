@@ -16,7 +16,7 @@
     },
     "debug_mode": {
         "description": "调试模式，开启后输出详细日志",
-        "type": "boolean",
+        "type": "bool",
         "default": false
     }
 }
