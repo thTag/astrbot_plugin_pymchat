@@ -1,3 +1,3 @@
-from .main import PymChatPlugin
+from .main import PymChatCurlPlugin
 
-__all__ = ["PymChatPlugin"]
+__all__ = ["PymChatCurlPlugin"]
