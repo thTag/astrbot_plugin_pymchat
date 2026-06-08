@@ -56,12 +56,10 @@ class PymChatPlugin(Star):
                 api_key = result.get("data", {}).get("api_key", "")
                 if api_key:
                     self.api_key = api_key
-                    # 修复：使用 self.config.save_config 而不是 self.context.save_config
+                    # 修复：self.config.save_config() 是同步方法，不能 await
+                    self.config["api_key"] = api_key
                     if hasattr(self.config, 'save_config'):
-                        await self.config.save_config()
-                    else:
-                        # 兼容旧版本或直接修改字典（AstrBot 会自动持久化部分属性）
-                        self.config["api_key"] = api_key
+                        self.config.save_config()
                     return True
             logger.error(f"自动登录失败: {result.get('message', '未知错误')}")
             return False
