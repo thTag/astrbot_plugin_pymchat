@@ -137,25 +137,56 @@ class PymChatPlugin(Star):
     @filter.command("pymchat")
     async def pymchat_help(self, event: AstrMessageEvent):
         """显示帮助信息"""
-        help_text = """📚 PymChat 助手 v2.0 (curl 版)
+        help_text = """
+╔══════════════════════════════════════════╗
+║       📱 PymChat 助手 v2.0               ║
+║       使用 curl 调用 PymChat API          ║
+╚══════════════════════════════════════════╝
 
-用法: pymchat <操作> [参数]
+📌 使用方式
+──────────────────────────────────────────
+  /pymchat <指令> [参数]
 
-操作列表:
-  help              显示本帮助
-  send <消息>       发送公共消息
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📬 消息指令
+──────────────────────────────────────────
+  help              显示本帮助信息
+  send <内容>       发送公共消息
   get [数量]        获取公共消息（默认10条）
-  send_private <用户ID> <消息>  发送私信
-  get_private [数量] 获取私信（默认10条）
-  friends           查看好友列表
-  add_friend <用户ID>  添加好友
-  status            查看插件状态
 
-示例:
-  pymchat send 你好世界
-  pymchat get 20
-  pymchat send_private 123 你好呀
-  pymchat add_friend 456"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💬 私信指令
+──────────────────────────────────────────
+  send_private <用户ID> <内容>  发送私信
+  get_private [数量]          获取私信
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👥 社交指令
+──────────────────────────────────────────
+  friends          查看好友列表
+  add_friend <用户ID>  添加好友
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚙️ 工具指令
+──────────────────────────────────────────
+  status           查看插件状态
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 快捷示例
+──────────────────────────────────────────
+  /pymchat send 你好世界
+  /pymchat get 20
+  /pymchat send_private 123 你好呀
+  /pymchat add_friend 456
+
+⚠️ 提示：首次使用需在插件配置中设置
+   username + password，系统将自动获取 API Key
+"""
         yield event.plain_result(help_text)
 
     @filter.command("pymchat send")
