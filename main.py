@@ -192,11 +192,12 @@ class PymChatPlugin(Star):
         url = f"{self.base_url}/api/ac.php?" + "&".join(query_parts)
         return await self._run_curl(["curl", "-s", url])
 
-    async def _render_result(self, title: str, icon: str, **kwargs):
-        """渲染并发送美化后的图片"""
+    async def _render_result(self, event: AstrMessageEvent, title: str, icon: str, **kwargs):
+        """渲染美化后的图片并返回结果对象"""
         data = {"title": title, "icon": icon, **kwargs}
         url = await self.html_render(HTML_TEMPLATE, data)
-        return MessageEventResult().image(url)
+        # 修复：正确调用 event 对象的 image_result 方法
+        return event.image_result(url)
 
     @filter.command("pymchat")
     async def pymchat_help(self, event: AstrMessageEvent):
@@ -206,7 +207,7 @@ class PymChatPlugin(Star):
             {"name": "👥 社交", "cmds": [{"name": "friends", "desc": "好友列表"}, {"name": "add_friend <ID>", "desc": "加好友"}]},
             {"name": "⚙️ 系统", "cmds": [{"name": "status", "desc": "查看状态"}]}
         ]
-        yield await self._render_result("PymChat 指令帮助", "📚", mode="help", help_groups=help_groups)
+        yield await self._render_result(event, "PymChat 指令帮助", "📚", mode="help", help_groups=help_groups)
 
     @filter.command("pymchat send")
     async def pymchat_send(self, event: AstrMessageEvent):
@@ -216,7 +217,7 @@ class PymChatPlugin(Star):
             return
         result = await self._call_pymchat_api("send_message", content=content)
         if result.get("status") == 200:
-            yield await self._render_result("操作成功", "✅", content=f"消息已发送到公共聊天室：\n{content}")
+            yield await self._render_result(event, "操作成功", "✅", content=f"消息已发送到公共聊天室：<br>{content}")
         else:
             yield event.plain_result(f"❌ 失败: {result.get('message')}")
 
@@ -229,7 +230,7 @@ class PymChatPlugin(Star):
         if result.get("status") == 200:
             msgs = result.get("data", {}).get("messages", [])
             items = [{"sender": m.get("sdn", m.get("sn", "未知")), "content": m.get("content", ""), "time": m.get("time", "")} for m in msgs]
-            yield await self._render_result("最新公共消息", "📨", mode="list", items=items)
+            yield await self._render_result(event, "最新公共消息", "📨", mode="list", items=items)
         else: yield event.plain_result("❌ 获取失败")
 
     @filter.command("pymchat send_private")
@@ -242,7 +243,7 @@ class PymChatPlugin(Star):
         uid, msg = parts[0], parts[1]
         result = await self._call_pymchat_api("send_message", recipient_id=uid, content=msg)
         if result.get("status") == 200:
-            yield await self._render_result("发送成功", "✅", content=f"已对用户 {uid} 发送私信。")
+            yield await self._render_result(event, "发送成功", "✅", content=f"已对用户 {uid} 发送私信。")
         else: yield event.plain_result("❌ 失败")
 
     @filter.command("pymchat get_private")
@@ -251,7 +252,7 @@ class PymChatPlugin(Star):
         if result.get("status") == 200:
             msgs = result.get("data", {}).get("messages", [])
             items = [{"sender": m.get("sdn", m.get("sn", "未知")), "content": m.get("content", ""), "time": m.get("time", "")} for m in msgs]
-            yield await self._render_result("最新私信", "💬", mode="list", items=items)
+            yield await self._render_result(event, "最新私信", "💬", mode="list", items=items)
         else: yield event.plain_result("❌ 获取失败")
 
     @filter.command("pymchat friends")
@@ -260,13 +261,13 @@ class PymChatPlugin(Star):
         if result.get("status") == 200:
             friends = result.get("data", {}).get("friends", [])
             items = [{"sender": f.get("display_name", f.get("username", "未知")), "content": f"ID: {f.get('id', '')}"} for f in friends]
-            yield await self._render_result("好友列表", "👥", mode="list", items=items)
+            yield await self._render_result(event, "好友列表", "👥", mode="list", items=items)
         else: yield event.plain_result("❌ 获取失败")
 
     @filter.command("pymchat status")
     async def pymchat_status(self, event: AstrMessageEvent):
         status_text = f"API Key: {'已配置' if self.api_key else '未配置'}<br>用户名: {self.username or '未设置'}<br>调试模式: {'开启' if self.debug else '关闭'}"
-        yield await self._render_result("插件状态", "📊", content=status_text)
+        yield await self._render_result(event, "插件状态", "📊", content=status_text)
 
 def register():
     return PymChatPlugin
