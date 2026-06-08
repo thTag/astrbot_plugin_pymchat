@@ -137,56 +137,20 @@ class PymChatPlugin(Star):
     @filter.command("pymchat")
     async def pymchat_help(self, event: AstrMessageEvent):
         """显示帮助信息"""
-        help_text = """
-╔══════════════════════════════════════════╗
-║       📱 PymChat 助手 v2.0               ║
-║       使用 curl 调用 PymChat API          ║
-╚══════════════════════════════════════════╝
-
-📌 使用方式
-──────────────────────────────────────────
-  /pymchat <指令> [参数]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📬 消息指令
-──────────────────────────────────────────
-  help              显示本帮助信息
-  send <内容>       发送公共消息
-  get [数量]        获取公共消息（默认10条）
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-💬 私信指令
-──────────────────────────────────────────
-  send_private <用户ID> <内容>  发送私信
-  get_private [数量]          获取私信
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-👥 社交指令
-──────────────────────────────────────────
-  friends          查看好友列表
-  add_friend <用户ID>  添加好友
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⚙️ 工具指令
-──────────────────────────────────────────
-  status           查看插件状态
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-💡 快捷示例
-──────────────────────────────────────────
-  /pymchat send 你好世界
-  /pymchat get 20
-  /pymchat send_private 123 你好呀
-  /pymchat add_friend 456
-
-⚠️ 提示：首次使用需在插件配置中设置
-   username + password，系统将自动获取 API Key
-"""
+        # 精简后的帮助信息，避开 T2I 阈值
+        help_text = (
+            "📱 PymChat 助手 v2.0\n"
+            "用法: /pymchat <指令> [参数]\n"
+            "─ 消息指令 ─\n"
+            "send <内容>: 发送公共消息\n"
+            "get [数量]: 获取公共消息\n"
+            "─ 私信指令 ─\n"
+            "send_private <ID> <内容>: 发私信\n"
+            "get_private [数量]: 获取私信\n"
+            "─ 其他指令 ─\n"
+            "friends: 好友列表 | add_friend <ID>: 加好友\n"
+            "status: 查看状态 | help: 帮助"
+        )
         yield event.plain_result(help_text)
 
     @filter.command("pymchat send")
@@ -194,23 +158,17 @@ class PymChatPlugin(Star):
         """发送公共消息"""
         content = event.message_str.replace("/pymchat send", "").strip()
         if not content:
-            yield event.plain_result("❌ 用法: pymchat send <消息内容>")
+            yield event.plain_result("❌ 用法: pymchat send <内容>")
             return
 
         if not await self._ensure_api_key():
-            yield event.plain_result("❌ 未配置 API Key，请先在插件配置中设置 username/password 或 api_key")
+            yield event.plain_result("❌ 未配置 API Key")
             return
 
         result = await self._call_pymchat_api("send_message", content=content)
 
         if result.get("status") == 200:
-            # 显示实际执行的 curl 命令（调试信息）
-            curl_cmd = result.get("_curl_cmd", "")
-            yield event.plain_result(
-                f"✅ 已发送消息到 PymChat 公共聊天室\n"
-                f"📨 内容: {content}\n"
-                f"🔧 curl: {curl_cmd}"
-            )
+            yield event.plain_result(f"✅ 已发送消息到 PymChat\n内容: {content}")
         else:
             yield event.plain_result(f"❌ 发送失败: {result.get('message', '未知错误')}")
 
@@ -218,12 +176,11 @@ class PymChatPlugin(Star):
     async def pymchat_get(self, event: AstrMessageEvent):
         """获取公共消息"""
         full_text = event.message_str.strip()
-        limit = 10
+        limit = 5 # 默认减少获取数量以避开 T2I
 
-        # 解析数量参数
         parts = full_text.split()
         if len(parts) >= 3 and parts[2].isdigit():
-            limit = min(int(parts[2]), 100)
+            limit = min(int(parts[2]), 10)
 
         if not await self._ensure_api_key():
             yield event.plain_result("❌ 未配置 API Key")
@@ -236,17 +193,13 @@ class PymChatPlugin(Star):
             if not messages:
                 yield event.plain_result("📭 暂无公共消息")
             else:
-                lines = [f"📨 公共消息 (共 {len(messages)} 条):\n"]
-                for m in messages[:10]:
+                lines = [f"📨 公共消息 (最近 {len(messages[:5])} 条):"]
+                for m in messages[:5]: # 强制只显示前 5 条以文字输出
                     sender = m.get("sdn", m.get("sn", "未知"))
-                    content = m.get("content", "")
-                    time = m.get("time", "")
-                    lines.append(f"【{sender}】{time}: {content}")
+                    content = (m.get("content", "")[:30] + "...") if len(m.get("content", "")) > 30 else m.get("content", "")
+                    lines.append(f"• {sender}: {content}")
 
-                output = "\n".join(lines)
-                if len(messages) > 10:
-                    output += f"\n... 仅显示前 10 条"
-                yield event.plain_result(output)
+                yield event.plain_result("\n".join(lines))
         else:
             yield event.plain_result(f"❌ 获取失败: {result.get('message', '未知错误')}")
 
@@ -257,7 +210,7 @@ class PymChatPlugin(Star):
         parts = content.split(maxsplit=1)
 
         if len(parts) < 2:
-            yield event.plain_result("❌ 用法: pymchat send_private <用户ID> <消息>")
+            yield event.plain_result("❌ 用法: pymchat send_private <ID> <内容>")
             return
 
         user_id, message = parts[0], parts[1]
@@ -266,18 +219,10 @@ class PymChatPlugin(Star):
             yield event.plain_result("❌ 未配置 API Key")
             return
 
-        result = await self._call_pymchat_api(
-            "send_message",
-            recipient_id=user_id,
-            content=message
-        )
+        result = await self._call_pymchat_api("send_message", recipient_id=user_id, content=message)
 
         if result.get("status") == 200:
-            yield event.plain_result(
-                f"✅ 已发送私信给用户 {user_id}\n"
-                f"📨 内容: {message}\n"
-                f"🔧 curl: {result.get('_curl_cmd', '')}"
-            )
+            yield event.plain_result(f"✅ 已发送私信给用户 {user_id}")
         else:
             yield event.plain_result(f"❌ 发送失败: {result.get('message', '未知错误')}")
 
@@ -285,11 +230,11 @@ class PymChatPlugin(Star):
     async def pymchat_get_private(self, event: AstrMessageEvent):
         """获取私信"""
         full_text = event.message_str.strip()
-        limit = 10
+        limit = 5
 
         parts = full_text.split()
         if len(parts) >= 3 and parts[2].isdigit():
-            limit = min(int(parts[2]), 100)
+            limit = min(int(parts[2]), 10)
 
         if not await self._ensure_api_key():
             yield event.plain_result("❌ 未配置 API Key")
@@ -302,16 +247,12 @@ class PymChatPlugin(Star):
             if not messages:
                 yield event.plain_result("📭 暂无私信")
             else:
-                lines = [f"📨 私信 (共 {len(messages)} 条):\n"]
-                for m in messages[:10]:
+                lines = [f"📨 最近私信 (前 {len(messages[:5])} 条):"]
+                for m in messages[:5]:
                     sender = m.get("sdn", m.get("sn", "未知"))
-                    content = m.get("content", "")
-                    lines.append(f"【{sender}】: {content}")
-
-                output = "\n".join(lines)
-                if len(messages) > 10:
-                    output += f"\n... 仅显示前 10 条"
-                yield event.plain_result(output)
+                    content = (m.get("content", "")[:30] + "...") if len(m.get("content", "")) > 30 else m.get("content", "")
+                    lines.append(f"• {sender}: {content}")
+                yield event.plain_result("\n".join(lines))
         else:
             yield event.plain_result(f"❌ 获取失败: {result.get('message', '未知错误')}")
 
@@ -329,11 +270,11 @@ class PymChatPlugin(Star):
             if not friends:
                 yield event.plain_result("👥 暂无好友")
             else:
-                lines = [f"👥 好友列表 ({len(friends)} 人):\n"]
-                for f in friends:
+                lines = [f"👥 好友 ({len(friends)} 人):"]
+                for f in friends[:10]: # 限制列表长度
                     name = f.get("display_name", f.get("username", "未知"))
                     uid = f.get("id", "")
-                    lines.append(f"• {name} (ID: {uid})")
+                    lines.append(f"• {name} ({uid})")
                 yield event.plain_result("\n".join(lines))
         else:
             yield event.plain_result(f"❌ 获取失败: {result.get('message', '未知错误')}")
@@ -344,7 +285,7 @@ class PymChatPlugin(Star):
         full_text = event.message_str.replace("/pymchat add_friend", "").strip()
 
         if not full_text or not full_text.isdigit():
-            yield event.plain_result("❌ 用法: pymchat add_friend <用户ID>")
+            yield event.plain_result("❌ 用法: pymchat add_friend <ID>")
             return
 
         if not await self._ensure_api_key():
@@ -354,7 +295,7 @@ class PymChatPlugin(Star):
         result = await self._call_pymchat_api("send_friend_request", recipient_id=full_text)
 
         if result.get("status") == 200:
-            yield event.plain_result(f"✅ 已发送好友申请给用户 {full_text}")
+            yield event.plain_result(f"✅ 已发送申请给用户 {full_text}")
         else:
             yield event.plain_result(f"❌ 添加失败: {result.get('message', '未知错误')}")
 
@@ -362,13 +303,10 @@ class PymChatPlugin(Star):
     async def pymchat_status(self, event: AstrMessageEvent):
         """查看插件状态"""
         status_lines = [
-            "📊 PymChat 助手状态",
-            f"🔑 API Key: {'已配置 ✅' if self.api_key else '未配置 ❌'}",
+            "📊 PymChat 状态",
+            f"🔑 API Key: {'已配置' if self.api_key else '未配置'}",
             f"👤 用户名: {self.username or '未设置'}",
-            f"🐛 调试模式: {'开启' if self.debug else '关闭'}",
-            f"🌐 API 地址: {self.base_url}",
-            "",
-            "💡 使用 `pymchat help` 查看所有命令"
+            f"🐛 调试: {'开启' if self.debug else '关闭'}"
         ]
         yield event.plain_result("\n".join(status_lines))
 
