@@ -12,136 +12,99 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Star, Context
 from astrbot.api import logger
 
-# 自定义美化模板 (基于 Jinja2)
+# 自定义美化模板 (简洁朴素风格，去除AI味)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
     <style>
-        :root {
-            --primary-color: #4facfe;
-            --secondary-color: #00f2fe;
-            --bg-dark: #1e1e2e;
-            --text-main: #cdd6f4;
-            --text-sub: #a6adc8;
-            --card-bg: rgba(30, 30, 46, 0.9);
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 0;
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-            background-color: transparent;
-        }
-        .card {
-            background: var(--card-bg);
-            border-radius: 16px;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            width: 450px;
-            overflow: hidden;
-            backdrop-filter: blur(8px);
-        }
-        .header {
-            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
-            padding: 15px 20px;
-            color: white;
-            font-size: 20px;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .content {
-            padding: 20px;
-            color: var(--text-main);
-            line-height: 1.6;
-        }
-        .item-list {
-            list-style: none;
+            font-family: -apple-system, "Microsoft YaHei", sans-serif;
+            background: white;
             padding: 0;
             margin: 0;
         }
-        .item {
-            padding: 10px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        .container {
+            width: 100%;
+            max-width: 480px;
+            border: 1px solid #e0e0e0;
+        }
+        .title-bar {
+            background: #f5f5f5;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 12px 16px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
             display: flex;
-            flex-direction: column;
-            gap: 4px;
+            align-items: center;
+            gap: 8px;
+        }
+        .body { padding: 16px; color: #333; font-size: 14px; line-height: 1.8; }
+        .item {
+            padding: 10px 0;
+            border-bottom: 1px solid #f0f0f0;
         }
         .item:last-child { border-bottom: none; }
-        .sender {
-            color: var(--primary-color);
-            font-weight: 600;
-            font-size: 14px;
+        .item-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+        .item-name { font-weight: bold; color: #1a1a1a; }
+        .item-time { color: #999; font-size: 12px; }
+        .item-content { color: #555; word-break: break-all; }
+        .section { margin-bottom: 16px; }
+        .section-title {
+            font-size: 13px;
+            color: #888;
+            border-bottom: 1px dashed #e0e0e0;
+            padding-bottom: 6px;
+            margin-bottom: 8px;
         }
-        .msg-text {
-            font-size: 16px;
-            word-wrap: break-word;
-        }
-        .time {
-            font-size: 12px;
-            color: var(--text-sub);
-            text-align: right;
-        }
-        .footer {
-            padding: 10px 20px;
-            background: rgba(0, 0, 0, 0.1);
-            color: var(--text-sub);
-            font-size: 12px;
-            text-align: center;
-        }
-        .cmd-group {
-            margin-bottom: 15px;
-        }
-        .cmd-title {
-            color: var(--secondary-color);
-            font-size: 14px;
-            font-weight: bold;
-            margin-bottom: 5px;
-            border-left: 3px solid var(--secondary-color);
-            padding-left: 8px;
-        }
-        .cmd-item {
-            font-size: 14px;
-            padding-left: 12px;
-            margin-bottom: 2px;
-        }
+        .cmd { display: flex; gap: 12px; margin-bottom: 4px; font-size: 14px; }
+        .cmd-name { color: #0066cc; min-width: 140px; }
+        .cmd-desc { color: #666; }
+        .status-row { display: flex; justify-content: space-between; padding: 6px 0; }
+        .status-key { color: #888; }
+        .status-val { color: #333; font-weight: 500; }
     </style>
 </head>
 <body>
-    <div class="card">
-        <div class="header">
-            <span>{{ icon }}</span>
-            <span>{{ title }}</span>
-        </div>
-        <div class="content">
+    <div class="container">
+        <div class="title-bar">{{ icon }} {{ title }}</div>
+        <div class="body">
             {% if mode == 'list' %}
-                <div class="item-list">
-                    {% for item in items %}
-                    <div class="item">
-                        <span class="sender">{{ item.sender }}</span>
-                        <span class="msg-text">{{ item.content }}</span>
-                        {% if item.time %}<span class="time">{{ item.time }}</span>{% endif %}
+                {% for item in items %}
+                <div class="item">
+                    <div class="item-header">
+                        <span class="item-name">{{ item.sender }}</span>
+                        {% if item.time %}<span class="item-time">{{ item.time }}</span>{% endif %}
+                    </div>
+                    <div class="item-content">{{ item.content }}</div>
+                </div>
+                {% endfor %}
+            {% elif mode == 'help' %}
+                {% for group in help_groups %}
+                <div class="section">
+                    <div class="section-title">{{ group.name }}</div>
+                    {% for cmd in group.cmds %}
+                    <div class="cmd">
+                        <span class="cmd-name">{{ cmd.name }}</span>
+                        <span class="cmd-desc">{{ cmd.desc }}</span>
                     </div>
                     {% endfor %}
                 </div>
-            {% elif mode == 'help' %}
-                {% for group in help_groups %}
-                <div class="cmd-group">
-                    <div class="cmd-title">{{ group.name }}</div>
-                    {% for cmd in group.cmds %}
-                    <div class="cmd-item"><b>{{ cmd.name }}</b>: {{ cmd.desc }}</div>
-                    {% endfor %}
+                {% endfor %}
+            {% elif mode == 'status' %}
+                {% for row in status_rows %}
+                <div class="status-row">
+                    <span class="status-key">{{ row.key }}</span>
+                    <span class="status-val">{{ row.val }}</span>
                 </div>
                 {% endfor %}
             {% else %}
-                <div class="msg-text">{{ content }}</div>
+                <div class="item-content">{{ content }}</div>
             {% endif %}
         </div>
-        <div class="footer">PymChat Adapter v2.0 • AstrBot 驱动</div>
     </div>
 </body>
 </html>
@@ -195,31 +158,30 @@ class PymChatPlugin(Star):
     async def _render_result(self, event: AstrMessageEvent, title: str, icon: str, **kwargs):
         """渲染美化后的图片并返回结果对象"""
         data = {"title": title, "icon": icon, **kwargs}
-        url = await self.html_render(HTML_TEMPLATE, data)
-        # 修复：正确调用 event 对象的 image_result 方法
+        url = await self.html_render(HTML_TEMPLATE, data, options={"omit_background": True})
         return event.image_result(url)
 
     @filter.command("pymchat")
     async def pymchat_help(self, event: AstrMessageEvent):
         help_groups = [
-            {"name": "📬 消息", "cmds": [{"name": "send <内容>", "desc": "发公共消息"}, {"name": "get [数]", "desc": "取公共消息"}]},
-            {"name": "💬 私信", "cmds": [{"name": "send_private <ID> <内容>", "desc": "发私信"}, {"name": "get_private [数]", "desc": "取私信"}]},
-            {"name": "👥 社交", "cmds": [{"name": "friends", "desc": "好友列表"}, {"name": "add_friend <ID>", "desc": "加好友"}]},
-            {"name": "⚙️ 系统", "cmds": [{"name": "status", "desc": "查看状态"}]}
+            {"name": "消息指令", "cmds": [{"name": "send <内容>", "desc": "发送公共消息"}, {"name": "get [数量]", "desc": "获取公共消息"}]},
+            {"name": "私信指令", "cmds": [{"name": "send_private <ID> <内容>", "desc": "发送私信"}, {"name": "get_private [数量]", "desc": "获取私信"}]},
+            {"name": "社交指令", "cmds": [{"name": "friends", "desc": "查看好友列表"}, {"name": "add_friend <ID>", "desc": "添加好友"}]},
+            {"name": "系统指令", "cmds": [{"name": "status", "desc": "查看插件状态"}]}
         ]
-        yield await self._render_result(event, "PymChat 指令帮助", "📚", mode="help", help_groups=help_groups)
+        yield await self._render_result(event, "PymChat 帮助", "?", mode="help", help_groups=help_groups)
 
     @filter.command("pymchat send")
     async def pymchat_send(self, event: AstrMessageEvent):
         content = event.message_str.replace("/pymchat send", "").strip()
         if not content:
-            yield event.plain_result("❌ 用法: pymchat send <内容>")
+            yield event.plain_result("用法: pymchat send <内容>")
             return
         result = await self._call_pymchat_api("send_message", content=content)
         if result.get("status") == 200:
-            yield await self._render_result(event, "操作成功", "✅", content=f"消息已发送到公共聊天室：<br>{content}")
+            yield await self._render_result(event, "发送成功", "O", content=f"已发送消息：{content}")
         else:
-            yield event.plain_result(f"❌ 失败: {result.get('message')}")
+            yield event.plain_result(f"发送失败: {result.get('message')}")
 
     @filter.command("pymchat get")
     async def pymchat_get(self, event: AstrMessageEvent):
@@ -230,21 +192,21 @@ class PymChatPlugin(Star):
         if result.get("status") == 200:
             msgs = result.get("data", {}).get("messages", [])
             items = [{"sender": m.get("sdn", m.get("sn", "未知")), "content": m.get("content", ""), "time": m.get("time", "")} for m in msgs]
-            yield await self._render_result(event, "最新公共消息", "📨", mode="list", items=items)
-        else: yield event.plain_result("❌ 获取失败")
+            yield await self._render_result(event, "公共消息", "~", mode="list", items=items)
+        else: yield event.plain_result("获取失败")
 
     @filter.command("pymchat send_private")
     async def pymchat_send_private(self, event: AstrMessageEvent):
         content = event.message_str.replace("/pymchat send_private", "").strip()
         parts = content.split(maxsplit=1)
         if len(parts) < 2:
-            yield event.plain_result("❌ 用法: pymchat send_private <ID> <内容>")
+            yield event.plain_result("用法: pymchat send_private <ID> <内容>")
             return
         uid, msg = parts[0], parts[1]
         result = await self._call_pymchat_api("send_message", recipient_id=uid, content=msg)
         if result.get("status") == 200:
-            yield await self._render_result(event, "发送成功", "✅", content=f"已对用户 {uid} 发送私信。")
-        else: yield event.plain_result("❌ 失败")
+            yield await self._render_result(event, "发送成功", "O", content=f"已对用户 {uid} 发送私信")
+        else: yield event.plain_result("发送失败")
 
     @filter.command("pymchat get_private")
     async def pymchat_get_private(self, event: AstrMessageEvent):
@@ -252,8 +214,8 @@ class PymChatPlugin(Star):
         if result.get("status") == 200:
             msgs = result.get("data", {}).get("messages", [])
             items = [{"sender": m.get("sdn", m.get("sn", "未知")), "content": m.get("content", ""), "time": m.get("time", "")} for m in msgs]
-            yield await self._render_result(event, "最新私信", "💬", mode="list", items=items)
-        else: yield event.plain_result("❌ 获取失败")
+            yield await self._render_result(event, "私信", "@", mode="list", items=items)
+        else: yield event.plain_result("获取失败")
 
     @filter.command("pymchat friends")
     async def pymchat_friends(self, event: AstrMessageEvent):
@@ -261,13 +223,17 @@ class PymChatPlugin(Star):
         if result.get("status") == 200:
             friends = result.get("data", {}).get("friends", [])
             items = [{"sender": f.get("display_name", f.get("username", "未知")), "content": f"ID: {f.get('id', '')}"} for f in friends]
-            yield await self._render_result(event, "好友列表", "👥", mode="list", items=items)
-        else: yield event.plain_result("❌ 获取失败")
+            yield await self._render_result(event, "好友列表", "+", mode="list", items=items)
+        else: yield event.plain_result("获取失败")
 
     @filter.command("pymchat status")
     async def pymchat_status(self, event: AstrMessageEvent):
-        status_text = f"API Key: {'已配置' if self.api_key else '未配置'}<br>用户名: {self.username or '未设置'}<br>调试模式: {'开启' if self.debug else '关闭'}"
-        yield await self._render_result(event, "插件状态", "📊", content=status_text)
+        status_rows = [
+            {"key": "API Key", "val": "已配置" if self.api_key else "未配置"},
+            {"key": "用户名", "val": self.username or "未设置"},
+            {"key": "调试模式", "val": "开启" if self.debug else "关闭"}
+        ]
+        yield await self._render_result(event, "状态", "i", mode="status", status_rows=status_rows)
 
 def register():
     return PymChatPlugin
