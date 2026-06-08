@@ -159,11 +159,11 @@ class PymChatClient:
     ) -> Tuple[bool, List[Dict], Optional[APIError]]:
         params = {
             "api_key": self.api_key,
-            "action": "get_messages",
-            "type": "public",
+            "action": "get_public_messages",   # 修正：公共消息专用 action
             "limit": limit,
-            "last_id": last_id,
         }
+        if last_id:
+            params["last_id"] = last_id
         success, data, error = await self._get(params)
         if success and data and "messages" in data:
             return True, data["messages"], None
@@ -182,9 +182,8 @@ class PymChatClient:
                 logger.debug(f"[PymChat] api_key 前8位: {preview}")
         params = {
             "api_key": self.api_key,
-            "action": "send_message",
+            "action": "send_public_message",   # 修正：公共消息专用 action
             "content": content,
-            "recipient_id": "all",
         }
         success, _, error = await self._post(params)
         return success, error
