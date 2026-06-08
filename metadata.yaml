@@ -1,6 +1,6 @@
 name: astrbot_plugin_pymchat
 display_name: PymChat 适配器
-version: "v2.0.0"
+version: "v1.0.0"
 short_desc: 使用 curl 调用 PymChat API
 desc: 将 PymChat 接入 AstrBot，支持发送/获取消息、私信、好友管理
 author: 叹号大帝
