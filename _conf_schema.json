@@ -1,70 +1,22 @@
 {
-    "username": {
+    "api_key": {
+        "description": "PymChat API 密钥",
         "type": "string",
-        "description": "PymChat 登录用户名",
-        "hint": "注册时的用户名"
+        "hint": "登录 https://chat.qplm.xyz 后获取，有效期30天，过期后需重新登录获取",
+        "obvious_hint": true
+    },
+    "username": {
+        "description": "用户名（用于自动获取API密钥，与api_key二选一）",
+        "type": "string",
+        "hint": "如果填写了用户名密码，插件将在首次使用时自动登录获取API密钥"
     },
     "password": {
-        "type": "string",
-        "description": "PymChat 登录密码",
-        "hint": "密码将以加密形式存储"
-    },
-    "api_key": {
-        "type": "string",
-        "description": "API 密钥（可选）",
-        "hint": "如已获取 API 密钥可直接填写，否则插件将自动登录获取"
-    },
-    "bot_name": {
-        "type": "string",
-        "description": "机器人昵称",
-        "hint": "用于识别 @ 机器人消息，不填则自动获取"
-    },
-    "trigger_keywords": {
-        "type": "string",
-        "description": "触发关键词",
-        "default": "bot",
-        "hint": "多个关键词用英文逗号分隔，例如 bot,ai,小助手"
-    },
-    "system_prompt": {
-        "type": "text",
-        "description": "系统提示词",
-        "default": "你是一个友好的 AI 助手，请用中文回答问题。",
-        "hint": "设定 AI 的人设和行为"
-    },
-    "poll_interval": {
-        "type": "int",
-        "description": "消息轮询间隔",
-        "default": 3,
-        "hint": "单位：秒。建议不低于 3 秒，避免触发频率限制"
-    },
-    "auto_reconnect": {
-        "type": "bool",
-        "description": "自动重连",
-        "default": true,
-        "hint": "连接断开时自动重连"
-    },
-    "enable_private_chat": {
-        "type": "bool",
-        "description": "启用私聊功能",
-        "default": true,
-        "hint": "是否响应私聊消息（需额外开发）"
-    },
-    "enable_group_chat": {
-        "type": "bool",
-        "description": "启用群聊功能",
-        "default": false,
-        "hint": "是否响应群聊消息（实验性功能）"
-    },
-    "max_message_length": {
-        "type": "int",
-        "description": "最大消息长度",
-        "default": 500,
-        "hint": "PymChat API 限制最大 500 字符"
+        "description": "密码（与username配对使用）",
+        "type": "string"
     },
     "debug_mode": {
-        "type": "bool",
-        "description": "调试模式",
-        "default": false,
-        "hint": "开启后将输出详细的请求/响应日志和调试信息"
+        "description": "调试模式，开启后输出详细日志",
+        "type": "boolean",
+        "default": false
     }
 }
