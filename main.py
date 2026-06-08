@@ -373,3 +373,21 @@ class PymChatSimplePlugin(Star):
 def register():
     """AstrBot 插件注册入口"""
     return PymChatSimplePlugin
+
+# 在 main.py 文件的末尾添加以下代码
+from astrbot.api.star import StarMetadata
+
+# 这个变量是 AstrBot 识别插件的入口
+__plugin_meta__ = StarMetadata(
+    name="astrbot_plugin_pymchat",     # 插件的内部ID，全小写，用下划线连接
+    display_name="PymChat",           # 在UI中显示的名称
+    version="v1.0.0",
+    description="将 PymChat API 封装成简单的命令式插件",
+    author="叹号大帝",                        # 替换成你的名字或昵称
+    repo="https://github.com/thTag/astrbot_plugin_pymchat",                       # 可以暂时留空或填写仓库URL
+    # star_type 指定了你的插件是一个标准的“星”插件
+    star_type="astrbot.core.star.Star", 
+    # plugin_class 指定了插件的主类，格式为 "模块名:类名"
+    # 因为我们的插件类名为 PymChatSimplePlugin
+    plugin_class="main:PymChatSimplePlugin"
+)
