@@ -13,7 +13,7 @@ from astrbot.api.star import Star, Context
 from astrbot.api import logger
 
 
-class PymChatCurlPlugin(Star):
+class PymChatPlugin(Star):
     """PymChat 适配器 - 使用 curl 调用 API"""
 
     def __init__(self, context: Context, config: Dict[str, Any]):
@@ -361,4 +361,4 @@ class PymChatCurlPlugin(Star):
 
 def register():
     """AstrBot 插件注册入口"""
-    return PymChatCurlPlugin
+    return PymChatPlugin
