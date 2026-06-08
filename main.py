@@ -56,7 +56,12 @@ class PymChatPlugin(Star):
                 api_key = result.get("data", {}).get("api_key", "")
                 if api_key:
                     self.api_key = api_key
-                    await self.context.save_config({"api_key": api_key})
+                    # 修复：使用 self.config.save_config 而不是 self.context.save_config
+                    if hasattr(self.config, 'save_config'):
+                        await self.config.save_config()
+                    else:
+                        # 兼容旧版本或直接修改字典（AstrBot 会自动持久化部分属性）
+                        self.config["api_key"] = api_key
                     return True
             logger.error(f"自动登录失败: {result.get('message', '未知错误')}")
             return False
@@ -95,9 +100,6 @@ class PymChatPlugin(Star):
         if not self.api_key:
             return {"status": 401, "message": "未配置 API Key"}
 
-        params = {"api_key": self.api_key, "action": action}
-        params.update(kwargs)
-
         # 构建 URL 参数
         query_parts = [f"api_key={self.api_key}", f"action={action}"]
         for k, v in kwargs.items():
@@ -133,19 +135,6 @@ class PymChatPlugin(Star):
         if self.username and self.password:
             return await self._auto_login()
         return False
-
-    def _parse_command(self, event: AstrMessageEvent, prefix: str) -> tuple:
-        """解析命令，返回 (action, content)"""
-        full_text = event.message_str.strip()
-        pattern = re.compile(rf'^{re.escape(prefix)}\s+(.*)$', re.IGNORECASE)
-        match = pattern.match(full_text)
-        if match:
-            content = match.group(1).strip()
-            parts = content.split(maxsplit=1)
-            if len(parts) >= 2:
-                return parts[0], parts[1]
-            return parts[0] if parts else ("", "")
-        return "", ""
 
     @filter.command("pymchat")
     async def pymchat_help(self, event: AstrMessageEvent):
