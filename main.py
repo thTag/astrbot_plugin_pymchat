@@ -1,98 +1,230 @@
 """
 PymChat 适配器 for AstrBot
-使用 curl 调用 PymChat API，并使用自定义 HTML 模板进行美化渲染
+使用 curl 调用 PymChat API，并使用赛博朋克毛玻璃风格的自定义 HTML 模板
 """
 import json
 import re
 import subprocess
 import asyncio
 from typing import Dict, Any, Optional, List
+from urllib.parse import quote
 
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Star, Context
 from astrbot.api import logger
 
-# 自定义美化模板 (简洁朴素风格，去除AI味)
+# 赛博朋克毛玻璃风格模板
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@400;700&display=swap');
+        
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            --accent-cyan: #00f2fe;
+            --accent-purple: #7000ff;
+            --accent-pink: #ff00c1;
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0b0;
+        }
+
         body {
-            font-family: -apple-system, "Microsoft YaHei", sans-serif;
-            background: white;
-            padding: 0;
+            font-family: 'Noto Sans SC', sans-serif;
             margin: 0;
+            padding: 40px;
+            background: var(--bg-gradient);
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            color: var(--text-primary);
         }
+
         .container {
-            width: 100%;
-            max-width: 480px;
-            border: 1px solid #e0e0e0;
+            width: 500px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            position: relative;
         }
-        .title-bar {
-            background: #f5f5f5;
-            border-bottom: 1px solid #e0e0e0;
-            padding: 12px 16px;
-            font-size: 16px;
-            font-weight: bold;
-            color: #333;
+
+        .container::before {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 4px;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple), var(--accent-pink));
+        }
+
+        .header {
+            padding: 30px 30px 20px;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 15px;
         }
-        .body { padding: 16px; color: #333; font-size: 14px; line-height: 1.8; }
-        .item {
+
+        .header-icon {
+            font-size: 32px;
+            background: rgba(255, 255, 255, 0.1);
+            width: 60px; height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 16px;
+            border: 1px solid var(--glass-border);
+        }
+
+        .header-info h1 {
+            margin: 0;
+            font-size: 24px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .header-info p {
+            margin: 5px 0 0;
+            font-size: 12px;
+            color: var(--accent-cyan);
+            font-family: 'JetBrains Mono', monospace;
+            opacity: 0.8;
+        }
+
+        .content {
+            padding: 0 30px 30px;
+        }
+
+        .list-item {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 15px;
+            margin-bottom: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .list-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+            transform: translateY(-2px);
+        }
+
+        .list-item .label {
+            font-size: 11px;
+            color: var(--accent-cyan);
+            text-transform: uppercase;
+            margin-bottom: 5px;
+            display: block;
+            font-weight: bold;
+        }
+
+        .list-item .value {
+            font-size: 16px;
+            line-height: 1.5;
+        }
+
+        .list-item .meta {
+            margin-top: 8px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .group-title {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin: 20px 0 10px;
+            padding-left: 5px;
+            border-left: 2px solid var(--accent-purple);
+        }
+
+        .cmd-box {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             padding: 10px 0;
-            border-bottom: 1px solid #f0f0f0;
+            border-bottom: 1px solid var(--glass-border);
         }
-        .item:last-child { border-bottom: none; }
-        .item-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
-        .item-name { font-weight: bold; color: #1a1a1a; }
-        .item-time { color: #999; font-size: 12px; }
-        .item-content { color: #555; word-break: break-all; }
-        .section { margin-bottom: 16px; }
-        .section-title {
+
+        .cmd-name {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent-cyan);
+            font-size: 14px;
+        }
+
+        .cmd-desc {
             font-size: 13px;
-            color: #888;
-            border-bottom: 1px dashed #e0e0e0;
-            padding-bottom: 6px;
-            margin-bottom: 8px;
+            color: var(--text-secondary);
         }
-        .cmd { display: flex; gap: 12px; margin-bottom: 4px; font-size: 14px; }
-        .cmd-name { color: #0066cc; min-width: 140px; }
-        .cmd-desc { color: #666; }
-        .status-row { display: flex; justify-content: space-between; padding: 6px 0; }
-        .status-key { color: #888; }
-        .status-val { color: #333; font-weight: 500; }
+
+        .footer {
+            padding: 20px;
+            text-align: center;
+            font-size: 10px;
+            color: var(--text-secondary);
+            letter-spacing: 2px;
+            opacity: 0.5;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .status-key {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .status-val {
+            color: var(--accent-cyan);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="title-bar">{{ icon }} {{ title }}</div>
-        <div class="body">
+        <div class="header">
+            <div class="header-icon">{{ icon }}</div>
+            <div class="header-info">
+                <h1>{{ title }}</h1>
+                <p>PYMCHAT_PROTOCOL_V2.0</p>
+            </div>
+        </div>
+        <div class="content">
             {% if mode == 'list' %}
                 {% for item in items %}
-                <div class="item">
-                    <div class="item-header">
-                        <span class="item-name">{{ item.sender }}</span>
-                        {% if item.time %}<span class="item-time">{{ item.time }}</span>{% endif %}
+                <div class="list-item">
+                    <span class="label">{{ item.sender }}</span>
+                    <div class="value">{{ item.content }}</div>
+                    {% if item.time %}
+                    <div class="meta">
+                        <span>STATUS: RECEIVED</span>
+                        <span>{{ item.time }}</span>
                     </div>
-                    <div class="item-content">{{ item.content }}</div>
+                    {% endif %}
                 </div>
                 {% endfor %}
             {% elif mode == 'help' %}
                 {% for group in help_groups %}
-                <div class="section">
-                    <div class="section-title">{{ group.name }}</div>
-                    {% for cmd in group.cmds %}
-                    <div class="cmd">
-                        <span class="cmd-name">{{ cmd.name }}</span>
-                        <span class="cmd-desc">{{ cmd.desc }}</span>
-                    </div>
-                    {% endfor %}
+                <div class="group-title">{{ group.name }}</div>
+                {% for cmd in group.cmds %}
+                <div class="cmd-box">
+                    <span class="cmd-name">/{{ cmd.name }}</span>
+                    <span class="cmd-desc">{{ cmd.desc }}</span>
                 </div>
+                {% endfor %}
                 {% endfor %}
             {% elif mode == 'status' %}
                 {% for row in status_rows %}
@@ -102,9 +234,13 @@ HTML_TEMPLATE = """
                 </div>
                 {% endfor %}
             {% else %}
-                <div class="item-content">{{ content }}</div>
+                <div class="list-item">
+                    <span class="label">SYSTEM_LOG</span>
+                    <div class="value" style="white-space: pre-wrap;">{{ content }}</div>
+                </div>
             {% endif %}
         </div>
+        <div class="footer">ENCRYPTED END-TO-END CONNECTION</div>
     </div>
 </body>
 </html>
@@ -124,7 +260,6 @@ class PymChatPlugin(Star):
             asyncio.create_task(self._auto_login_on_start())
 
     async def _auto_login_on_start(self):
-        logger.info("检测到未配置 API Key，正在尝试自动登录...")
         await self._auto_login()
 
     async def _auto_login(self) -> bool:
@@ -150,90 +285,75 @@ class PymChatPlugin(Star):
 
     async def _call_pymchat_api(self, action: str, **kwargs) -> Dict[str, Any]:
         query_parts = [f"api_key={self.api_key}", f"action={action}"]
-        from urllib.parse import quote
         for k, v in kwargs.items(): query_parts.append(f"{k}={quote(str(v))}")
         url = f"{self.base_url}/api/ac.php?" + "&".join(query_parts)
         return await self._run_curl(["curl", "-s", url])
 
     async def _render_result(self, event: AstrMessageEvent, title: str, icon: str, **kwargs):
-        """渲染美化后的图片并返回结果对象"""
         data = {"title": title, "icon": icon, **kwargs}
-        url = await self.html_render(HTML_TEMPLATE, data, options={"omit_background": True})
+        options = {"full_page": False, "omit_background": True}
+        url = await self.html_render(HTML_TEMPLATE, data, options=options)
         return event.image_result(url)
 
     @filter.command("pymchat")
     async def pymchat_help(self, event: AstrMessageEvent):
         help_groups = [
-            {"name": "消息指令", "cmds": [{"name": "send <内容>", "desc": "发送公共消息"}, {"name": "get [数量]", "desc": "获取公共消息"}]},
-            {"name": "私信指令", "cmds": [{"name": "send_private <ID> <内容>", "desc": "发送私信"}, {"name": "get_private [数量]", "desc": "获取私信"}]},
-            {"name": "社交指令", "cmds": [{"name": "friends", "desc": "查看好友列表"}, {"name": "add_friend <ID>", "desc": "添加好友"}]},
-            {"name": "系统指令", "cmds": [{"name": "status", "desc": "查看插件状态"}]}
+            {"name": "COMMANDS", "cmds": [{"name": "pymchat send", "desc": "发送消息"}, {"name": "pymchat get", "desc": "拉取消息"}]},
+            {"name": "PRIVATE", "cmds": [{"name": "pymchat send_private", "desc": "发私信"}, {"name": "pymchat get_private", "desc": "收私信"}]},
+            {"name": "SYSTEM", "cmds": [{"name": "pymchat friends", "desc": "好友"}, {"name": "pymchat status", "desc": "状态"}]}
         ]
-        yield await self._render_result(event, "PymChat 帮助", "?", mode="help", help_groups=help_groups)
+        yield await self._render_result(event, "Command List", "🛡️", mode="help", help_groups=help_groups)
 
     @filter.command("pymchat send")
     async def pymchat_send(self, event: AstrMessageEvent):
         content = event.message_str.replace("/pymchat send", "").strip()
-        if not content:
-            yield event.plain_result("用法: pymchat send <内容>")
-            return
+        if not content: return
         result = await self._call_pymchat_api("send_message", content=content)
         if result.get("status") == 200:
-            yield await self._render_result(event, "发送成功", "O", content=f"已发送消息：{content}")
-        else:
-            yield event.plain_result(f"发送失败: {result.get('message')}")
+            yield await self._render_result(event, "Transmission Success", "🚀", content=f"DATA SENT:\n{content}")
+        else: yield event.plain_result(f"ERROR: {result.get('message')}")
 
     @filter.command("pymchat get")
     async def pymchat_get(self, event: AstrMessageEvent):
-        limit = 10
-        parts = event.message_str.strip().split()
-        if len(parts) >= 3 and parts[2].isdigit(): limit = int(parts[2])
-        result = await self._call_pymchat_api("get_messages", type="public", limit=limit)
+        result = await self._call_pymchat_api("get_messages", type="public", limit=5)
         if result.get("status") == 200:
             msgs = result.get("data", {}).get("messages", [])
-            items = [{"sender": m.get("sdn", m.get("sn", "未知")), "content": m.get("content", ""), "time": m.get("time", "")} for m in msgs]
-            yield await self._render_result(event, "公共消息", "~", mode="list", items=items)
-        else: yield event.plain_result("获取失败")
+            items = [{"sender": m.get("sdn", "ANONYMOUS"), "content": m.get("content", ""), "time": m.get("time", "")} for m in msgs]
+            yield await self._render_result(event, "Incoming Stream", "📥", mode="list", items=items)
 
     @filter.command("pymchat send_private")
     async def pymchat_send_private(self, event: AstrMessageEvent):
         content = event.message_str.replace("/pymchat send_private", "").strip()
         parts = content.split(maxsplit=1)
-        if len(parts) < 2:
-            yield event.plain_result("用法: pymchat send_private <ID> <内容>")
-            return
-        uid, msg = parts[0], parts[1]
-        result = await self._call_pymchat_api("send_message", recipient_id=uid, content=msg)
+        if len(parts) < 2: return
+        result = await self._call_pymchat_api("send_message", recipient_id=parts[0], content=parts[1])
         if result.get("status") == 200:
-            yield await self._render_result(event, "发送成功", "O", content=f"已对用户 {uid} 发送私信")
-        else: yield event.plain_result("发送失败")
+            yield await self._render_result(event, "Secure Message Sent", "🔐", content=f"TARGET: {parts[0]}")
 
     @filter.command("pymchat get_private")
     async def pymchat_get_private(self, event: AstrMessageEvent):
-        result = await self._call_pymchat_api("get_messages", type="private", limit=10)
+        result = await self._call_pymchat_api("get_messages", type="private", limit=5)
         if result.get("status") == 200:
             msgs = result.get("data", {}).get("messages", [])
-            items = [{"sender": m.get("sdn", m.get("sn", "未知")), "content": m.get("content", ""), "time": m.get("time", "")} for m in msgs]
-            yield await self._render_result(event, "私信", "@", mode="list", items=items)
-        else: yield event.plain_result("获取失败")
+            items = [{"sender": m.get("sdn", "ANONYMOUS"), "content": m.get("content", ""), "time": m.get("time", "")} for m in msgs]
+            yield await self._render_result(event, "Private Stream", "🔒", mode="list", items=items)
 
     @filter.command("pymchat friends")
     async def pymchat_friends(self, event: AstrMessageEvent):
         result = await self._call_pymchat_api("get_friends")
         if result.get("status") == 200:
             friends = result.get("data", {}).get("friends", [])
-            items = [{"sender": f.get("display_name", f.get("username", "未知")), "content": f"ID: {f.get('id', '')}"} for f in friends]
-            yield await self._render_result(event, "好友列表", "+", mode="list", items=items)
-        else: yield event.plain_result("获取失败")
+            items = [{"sender": f.get("display_name", "USER"), "content": f"ID: {f.get('id')}"} for f in friends]
+            yield await self._render_result(event, "Contact List", "👥", mode="list", items=items)
 
     @filter.command("pymchat status")
     async def pymchat_status(self, event: AstrMessageEvent):
         status_rows = [
-            {"key": "API Key", "val": "已配置" if self.api_key else "未配置"},
-            {"key": "用户名", "val": self.username or "未设置"},
-            {"key": "调试模式", "val": "开启" if self.debug else "关闭"}
+            {"key": "KEY_STATUS", "val": "AUTHORIZED" if self.api_key else "UNAUTHORIZED"},
+            {"key": "USER_ID", "val": self.username or "GUEST"},
+            {"key": "DEBUG_MODE", "val": str(self.debug).upper()}
         ]
-        yield await self._render_result(event, "状态", "i", mode="status", status_rows=status_rows)
+        yield await self._render_result(event, "System Status", "📊", mode="status", status_rows=status_rows)
 
 def register():
     return PymChatPlugin
