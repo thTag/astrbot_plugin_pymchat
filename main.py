@@ -45,6 +45,10 @@ class PymChatClient:
     ) -> Tuple[bool, Optional[dict], Optional[APIError]]:
         if params is None:
             params = {}
+        # 调试：打印 API Key 前几位（如果有）
+        if self.debug and "api_key" in params and params["api_key"]:
+            key_preview = params["api_key"][:8] + "..."
+            logger.debug(f"[PymChat] 请求携带 API Key: {key_preview}")
         params = self._clean_params(params)
 
         if self.debug:
@@ -125,6 +129,8 @@ class PymChatClient:
     ) -> Tuple[bool, Optional[dict], Optional[APIError]]:
         await self.ensure_session()
         if not self.api_key:
+            if self.debug:
+                logger.debug("[PymChat] _get: api_key 为空，返回 401")
             return False, None, APIError(401, "API Key 未设置，请检查配置", 401)
         return await self._request("GET", self.BASE_URL, params=params)
 
@@ -133,6 +139,8 @@ class PymChatClient:
     ) -> Tuple[bool, Optional[dict], Optional[APIError]]:
         await self.ensure_session()
         if not self.api_key:
+            if self.debug:
+                logger.debug("[PymChat] _post: api_key 为空，返回 401")
             return False, None, APIError(401, "API Key 未设置，请检查配置", 401)
 
         now = time.time()
@@ -167,6 +175,10 @@ class PymChatClient:
     async def send_public_message(
         self, content: str
     ) -> Tuple[bool, Optional[APIError]]:
+        if self.debug:
+            logger.debug(f"[PymChat] send_public_message: api_key 存在? {bool(self.api_key)}")
+            if self.api_key:
+                logger.debug(f"[PymChat] api_key 前8位: {self.api_key[:8]}...")
         params = {
             "api_key": self.api_key,
             "action": "send_message",
@@ -404,6 +416,8 @@ class PymChatPlugin(Star):
         auth_success = False
         if self.api_key:
             logger.info("使用提供的 API Key 验证...")
+            if self.debug:
+                logger.debug(f"API Key 前8位: {self.api_key[:8]}...")
             success, profile, error = await self.client.get_profile()
             if success:
                 # 兼容不同的字段名
@@ -447,6 +461,9 @@ class PymChatPlugin(Star):
                 self.bot_name = "Bot"
 
         logger.info(f"PymChat 机器人昵称: {self.bot_name}")
+        # 再次确认 client.api_key 存在
+        if self.debug and self.client.api_key:
+            logger.debug(f"初始化后 client.api_key 前8位: {self.client.api_key[:8]}...")
         return True
 
     async def initialize(self):
@@ -688,6 +705,7 @@ class PymChatPlugin(Star):
             return
         if self.debug:
             logger.debug(f"[命令] 发送公共消息: {message}")
+            logger.debug(f"[命令] 当前 client.api_key 存在? {bool(self.client.api_key)}")
         success, error = await self.client.send_public_message(message)
         if success:
             logger.info(f"手动发送公共消息成功: {message[:50]}...")
