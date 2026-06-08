@@ -361,7 +361,6 @@ class PymChatClient:
 class PymChatPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
-        # 配置由框架自动注入，内容为 _conf_schema.json 定义的字段
         self.config = config
         self.client: Optional[PymChatClient] = None
         self.bot_name: Optional[str] = None
@@ -370,7 +369,6 @@ class PymChatPlugin(Star):
         self.last_msg_id: Optional[str] = None
         self.init_error: Optional[str] = None
 
-        # 从 config 中读取配置（支持字典方法）
         self.username = self.config.get("username", "")
         self.password = self.config.get("password", "")
         self.api_key = self.config.get("api_key", "")
@@ -397,7 +395,6 @@ class PymChatPlugin(Star):
         )
 
     async def _do_initialize(self):
-        """执行认证和启动准备"""
         self.init_error = None
         logger.info("开始 PymChat 认证...")
         self.client = PymChatClient(
@@ -409,7 +406,8 @@ class PymChatPlugin(Star):
             logger.info("使用提供的 API Key 验证...")
             success, profile, error = await self.client.get_profile()
             if success:
-                self.client.user_id = profile.get("user_id")
+                # 兼容不同的字段名
+                self.client.user_id = profile.get("user_id") or profile.get("id") or profile.get("uid")
                 auth_success = True
                 logger.info(f"API Key 验证成功，用户ID: {self.client.user_id}")
             else:
@@ -439,7 +437,6 @@ class PymChatPlugin(Star):
             logger.error("PymChat 认证失败，插件将保持停止状态。")
             return False
 
-        # 获取机器人昵称
         if self.bot_name_config:
             self.bot_name = self.bot_name_config
         else:
@@ -453,7 +450,6 @@ class PymChatPlugin(Star):
         return True
 
     async def initialize(self):
-        """插件启动时的初始化"""
         success = await self._do_initialize()
         if success:
             self.running = True
@@ -613,9 +609,7 @@ class PymChatPlugin(Star):
 
     @filter.command("pymchat_reload")
     async def reload_plugin(self, event: AstrMessageEvent):
-        """重新加载配置并尝试重新初始化（无需重启机器人）"""
         yield event.plain_result("🔄 正在重新加载配置并尝试初始化...")
-        # 停止当前轮询
         self.running = False
         if self.poll_task:
             self.poll_task.cancel()
@@ -626,9 +620,6 @@ class PymChatPlugin(Star):
         if self.client and self.client.session:
             await self.client.session.close()
 
-        # 从框架重新获取配置（注意：config 对象不会自动更新，需要重新读取）
-        # 但 AstrBotConfig 实例在插件生命周期内不会自动更新，所以这里直接使用 self.config 中的值已经是最新的
-        # 如果框架支持热更新，可以调用 self.config.load()，但为了可靠，重新从 self.config 读取配置值
         self.username = self.config.get("username", "")
         self.password = self.config.get("password", "")
         self.api_key = self.config.get("api_key", "")
@@ -684,11 +675,11 @@ class PymChatPlugin(Star):
                 yield event.plain_result("❌ 同步失败，未知错误")
 
     @filter.command("pymchat_send")
-    async def send_public(self, event: AstrMessageEvent, *content):
+    async def send_public(self, event: AstrMessageEvent, message: str = ""):
+        """发送公共消息：/pymchat_send <消息内容>"""
         if not self.client:
             yield event.plain_result("❌ 客户端未初始化")
             return
-        message = " ".join(content)
         if not message:
             yield event.plain_result("消息内容不能为空")
             return
@@ -707,14 +698,14 @@ class PymChatPlugin(Star):
             yield event.plain_result(f"❌ {error_msg}")
 
     @filter.command("pymchat_send_private")
-    async def send_private(self, event: AstrMessageEvent, user_id: str, *content):
+    async def send_private(self, event: AstrMessageEvent, user_id: str, message: str = ""):
+        """发送私信：/pymchat_send_private <用户ID> <消息内容>"""
         if not self.client:
             yield event.plain_result("❌ 客户端未初始化")
             return
         if not self.enable_private_chat:
             yield event.plain_result("私聊功能未启用")
             return
-        message = " ".join(content)
         if not message:
             yield event.plain_result("消息内容不能为空")
             return
@@ -757,11 +748,12 @@ class PymChatPlugin(Star):
         yield event.plain_result("\n".join(lines))
 
     @filter.command("pymchat_add_friend")
-    async def add_friend_cmd(self, event: AstrMessageEvent, user_id: str, *message):
+    async def add_friend_cmd(self, event: AstrMessageEvent, user_id: str, message: str = ""):
+        """发送好友申请：/pymchat_add_friend <用户ID> [附加消息]"""
         if not self.client:
             yield event.plain_result("❌ 客户端未初始化")
             return
-        msg = " ".join(message) if message else "你好，我是机器人，请求添加好友。"
+        msg = message if message else "你好，我是机器人，请求添加好友。"
         if self.debug:
             logger.debug(f"[命令] 发送好友申请给 {user_id}, 附加消息: {msg}")
         success, error = await self.client.add_friend(user_id, msg)
@@ -831,14 +823,14 @@ class PymChatPlugin(Star):
             yield event.plain_result(f"❌ {error_msg}")
 
     @filter.command("pymchat_group")
-    async def group_chat(self, event: AstrMessageEvent, group_id: str, *content):
+    async def group_chat(self, event: AstrMessageEvent, group_id: str, message: str = ""):
+        """发送群消息：/pymchat_group <群号> <消息内容> (需启用群聊功能)"""
         if not self.client:
             yield event.plain_result("❌ 客户端未初始化")
             return
         if not self.enable_group_chat:
             yield event.plain_result("群聊功能未启用")
             return
-        message = " ".join(content)
         if not message:
             yield event.plain_result("消息内容不能为空")
             return
