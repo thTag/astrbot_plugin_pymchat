@@ -1,6 +1,6 @@
 """
 PymChat 适配器 for AstrBot
-使用 curl 调用 PymChat API
+使用 curl 调用 PymChat API，并使用自定义 HTML 模板进行美化渲染
 """
 import json
 import re
@@ -12,10 +12,142 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Star, Context
 from astrbot.api import logger
 
+# 自定义美化模板 (基于 Jinja2)
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        :root {
+            --primary-color: #4facfe;
+            --secondary-color: #00f2fe;
+            --bg-dark: #1e1e2e;
+            --text-main: #cdd6f4;
+            --text-sub: #a6adc8;
+            --card-bg: rgba(30, 30, 46, 0.9);
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            background-color: transparent;
+        }
+        .card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            width: 450px;
+            overflow: hidden;
+            backdrop-filter: blur(8px);
+        }
+        .header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            padding: 15px 20px;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .content {
+            padding: 20px;
+            color: var(--text-main);
+            line-height: 1.6;
+        }
+        .item-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .item {
+            padding: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .item:last-child { border-bottom: none; }
+        .sender {
+            color: var(--primary-color);
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .msg-text {
+            font-size: 16px;
+            word-wrap: break-word;
+        }
+        .time {
+            font-size: 12px;
+            color: var(--text-sub);
+            text-align: right;
+        }
+        .footer {
+            padding: 10px 20px;
+            background: rgba(0, 0, 0, 0.1);
+            color: var(--text-sub);
+            font-size: 12px;
+            text-align: center;
+        }
+        .cmd-group {
+            margin-bottom: 15px;
+        }
+        .cmd-title {
+            color: var(--secondary-color);
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 5px;
+            border-left: 3px solid var(--secondary-color);
+            padding-left: 8px;
+        }
+        .cmd-item {
+            font-size: 14px;
+            padding-left: 12px;
+            margin-bottom: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="header">
+            <span>{{ icon }}</span>
+            <span>{{ title }}</span>
+        </div>
+        <div class="content">
+            {% if mode == 'list' %}
+                <div class="item-list">
+                    {% for item in items %}
+                    <div class="item">
+                        <span class="sender">{{ item.sender }}</span>
+                        <span class="msg-text">{{ item.content }}</span>
+                        {% if item.time %}<span class="time">{{ item.time }}</span>{% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            {% elif mode == 'help' %}
+                {% for group in help_groups %}
+                <div class="cmd-group">
+                    <div class="cmd-title">{{ group.name }}</div>
+                    {% for cmd in group.cmds %}
+                    <div class="cmd-item"><b>{{ cmd.name }}</b>: {{ cmd.desc }}</div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="msg-text">{{ content }}</div>
+            {% endif %}
+        </div>
+        <div class="footer">PymChat Adapter v2.0 • AstrBot 驱动</div>
+    </div>
+</body>
+</html>
+"""
 
 class PymChatPlugin(Star):
-    """PymChat 适配器 - 使用 curl 调用 API"""
-
     def __init__(self, context: Context, config: Dict[str, Any]):
         super().__init__(context)
         self.config = config
@@ -25,296 +157,116 @@ class PymChatPlugin(Star):
         self.debug: bool = config.get("debug_mode", False)
         self.base_url: str = "https://chat.qplm.xyz"
 
-        # 启动时自动尝试获取 API Key
         if self.username and self.password and not self.api_key:
             asyncio.create_task(self._auto_login_on_start())
 
     async def _auto_login_on_start(self):
-        """插件初始化时自动登录获取 API Key"""
         logger.info("检测到未配置 API Key，正在尝试自动登录...")
-        success = await self._auto_login()
-        if success:
-            logger.info("自动登录成功，API Key 已获取")
-        else:
-            logger.warning("自动登录失败，请检查用户名密码配置")
+        await self._auto_login()
 
     async def _auto_login(self) -> bool:
-        """自动登录获取 API Key"""
         url = f"{self.base_url}/api/login.php"
         payload = json.dumps({"username": self.username, "password": self.password})
-
-        cmd = [
-            "curl", "-s", "-X", "POST",
-            url,
-            "-H", "Content-Type: application/json",
-            "-d", payload
-        ]
-
+        cmd = ["curl", "-s", "-X", "POST", url, "-H", "Content-Type: application/json", "-d", payload]
         try:
             result = await self._run_curl(cmd)
             if result.get("status") == 200:
                 api_key = result.get("data", {}).get("api_key", "")
                 if api_key:
                     self.api_key = api_key
-                    # 修复：self.config.save_config() 是同步方法，不能 await
                     self.config["api_key"] = api_key
-                    if hasattr(self.config, 'save_config'):
-                        self.config.save_config()
+                    if hasattr(self.config, 'save_config'): self.config.save_config()
                     return True
-            logger.error(f"自动登录失败: {result.get('message', '未知错误')}")
             return False
-        except Exception as e:
-            logger.error(f"自动登录异常: {e}")
-            return False
+        except Exception: return False
 
     async def _run_curl(self, cmd: List[str]) -> Dict[str, Any]:
-        """执行 curl 命令并解析 JSON 响应"""
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-            response = stdout.decode('utf-8').strip()
-
-            if self.debug:
-                logger.debug(f"执行命令: {' '.join(cmd)}")
-                logger.debug(f"响应: {response}")
-
-            if not response:
-                return {"status": 500, "message": "空响应"}
-
-            return json.loads(response)
-        except json.JSONDecodeError:
-            logger.error(f"JSON 解析失败: {response}")
-            return {"status": 500, "message": "响应解析失败"}
-        except Exception as e:
-            logger.error(f"curl 执行异常: {e}")
-            return {"status": 500, "message": str(e)}
+        process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, _ = await process.communicate()
+        return json.loads(stdout.decode('utf-8').strip())
 
     async def _call_pymchat_api(self, action: str, **kwargs) -> Dict[str, Any]:
-        """调用 PymChat API (使用 curl)"""
-        if not self.api_key:
-            return {"status": 401, "message": "未配置 API Key"}
-
-        # 构建 URL 参数
         query_parts = [f"api_key={self.api_key}", f"action={action}"]
-        for k, v in kwargs.items():
-            query_parts.append(f"{k}={v}")
+        from urllib.parse import quote
+        for k, v in kwargs.items(): query_parts.append(f"{k}={quote(str(v))}")
+        url = f"{self.base_url}/api/ac.php?" + "&".join(query_parts)
+        return await self._run_curl(["curl", "-s", url])
 
-        # URL 编码处理
-        encoded_params = []
-        for part in query_parts:
-            if "=" in part:
-                key, val = part.split("=", 1)
-                from urllib.parse import quote
-                encoded_params.append(f"{key}={quote(val, safe='')}")
-
-        url = f"{self.base_url}/api/ac.php?" + "&".join(encoded_params)
-
-        # 记录 curl 命令（用于调试展示给用户）
-        curl_cmd = f'curl "{url}"'
-        logger.debug(f"执行: {curl_cmd}")
-
-        cmd = ["curl", "-s", url]
-
-        try:
-            result = await self._run_curl(cmd)
-            result["_curl_cmd"] = curl_cmd  # 附加调试信息
-            return result
-        except Exception as e:
-            return {"status": 500, "message": str(e), "_curl_cmd": curl_cmd}
-
-    async def _ensure_api_key(self) -> bool:
-        """确保 API Key 可用，必要时自动登录"""
-        if self.api_key:
-            return True
-        if self.username and self.password:
-            return await self._auto_login()
-        return False
+    async def _render_result(self, title: str, icon: str, **kwargs):
+        """渲染并发送美化后的图片"""
+        data = {"title": title, "icon": icon, **kwargs}
+        url = await self.html_render(HTML_TEMPLATE, data)
+        return MessageEventResult().image(url)
 
     @filter.command("pymchat")
     async def pymchat_help(self, event: AstrMessageEvent):
-        """显示帮助信息"""
-        # 精简后的帮助信息，避开 T2I 阈值
-        help_text = (
-            "📱 PymChat 助手 v2.0\n"
-            "用法: /pymchat <指令> [参数]\n"
-            "─ 消息指令 ─\n"
-            "send <内容>: 发送公共消息\n"
-            "get [数量]: 获取公共消息\n"
-            "─ 私信指令 ─\n"
-            "send_private <ID> <内容>: 发私信\n"
-            "get_private [数量]: 获取私信\n"
-            "─ 其他指令 ─\n"
-            "friends: 好友列表 | add_friend <ID>: 加好友\n"
-            "status: 查看状态 | help: 帮助"
-        )
-        yield event.plain_result(help_text)
+        help_groups = [
+            {"name": "📬 消息", "cmds": [{"name": "send <内容>", "desc": "发公共消息"}, {"name": "get [数]", "desc": "取公共消息"}]},
+            {"name": "💬 私信", "cmds": [{"name": "send_private <ID> <内容>", "desc": "发私信"}, {"name": "get_private [数]", "desc": "取私信"}]},
+            {"name": "👥 社交", "cmds": [{"name": "friends", "desc": "好友列表"}, {"name": "add_friend <ID>", "desc": "加好友"}]},
+            {"name": "⚙️ 系统", "cmds": [{"name": "status", "desc": "查看状态"}]}
+        ]
+        yield await self._render_result("PymChat 指令帮助", "📚", mode="help", help_groups=help_groups)
 
     @filter.command("pymchat send")
     async def pymchat_send(self, event: AstrMessageEvent):
-        """发送公共消息"""
         content = event.message_str.replace("/pymchat send", "").strip()
         if not content:
             yield event.plain_result("❌ 用法: pymchat send <内容>")
             return
-
-        if not await self._ensure_api_key():
-            yield event.plain_result("❌ 未配置 API Key")
-            return
-
         result = await self._call_pymchat_api("send_message", content=content)
-
         if result.get("status") == 200:
-            yield event.plain_result(f"✅ 已发送消息到 PymChat\n内容: {content}")
+            yield await self._render_result("操作成功", "✅", content=f"消息已发送到公共聊天室：\n{content}")
         else:
-            yield event.plain_result(f"❌ 发送失败: {result.get('message', '未知错误')}")
+            yield event.plain_result(f"❌ 失败: {result.get('message')}")
 
     @filter.command("pymchat get")
     async def pymchat_get(self, event: AstrMessageEvent):
-        """获取公共消息"""
-        full_text = event.message_str.strip()
-        limit = 5 # 默认减少获取数量以避开 T2I
-
-        parts = full_text.split()
-        if len(parts) >= 3 and parts[2].isdigit():
-            limit = min(int(parts[2]), 10)
-
-        if not await self._ensure_api_key():
-            yield event.plain_result("❌ 未配置 API Key")
-            return
-
+        limit = 10
+        parts = event.message_str.strip().split()
+        if len(parts) >= 3 and parts[2].isdigit(): limit = int(parts[2])
         result = await self._call_pymchat_api("get_messages", type="public", limit=limit)
-
         if result.get("status") == 200:
-            messages = result.get("data", {}).get("messages", [])
-            if not messages:
-                yield event.plain_result("📭 暂无公共消息")
-            else:
-                lines = [f"📨 公共消息 (最近 {len(messages[:5])} 条):"]
-                for m in messages[:5]: # 强制只显示前 5 条以文字输出
-                    sender = m.get("sdn", m.get("sn", "未知"))
-                    content = (m.get("content", "")[:30] + "...") if len(m.get("content", "")) > 30 else m.get("content", "")
-                    lines.append(f"• {sender}: {content}")
-
-                yield event.plain_result("\n".join(lines))
-        else:
-            yield event.plain_result(f"❌ 获取失败: {result.get('message', '未知错误')}")
+            msgs = result.get("data", {}).get("messages", [])
+            items = [{"sender": m.get("sdn", m.get("sn", "未知")), "content": m.get("content", ""), "time": m.get("time", "")} for m in msgs]
+            yield await self._render_result("最新公共消息", "📨", mode="list", items=items)
+        else: yield event.plain_result("❌ 获取失败")
 
     @filter.command("pymchat send_private")
     async def pymchat_send_private(self, event: AstrMessageEvent):
-        """发送私信"""
         content = event.message_str.replace("/pymchat send_private", "").strip()
         parts = content.split(maxsplit=1)
-
         if len(parts) < 2:
             yield event.plain_result("❌ 用法: pymchat send_private <ID> <内容>")
             return
-
-        user_id, message = parts[0], parts[1]
-
-        if not await self._ensure_api_key():
-            yield event.plain_result("❌ 未配置 API Key")
-            return
-
-        result = await self._call_pymchat_api("send_message", recipient_id=user_id, content=message)
-
+        uid, msg = parts[0], parts[1]
+        result = await self._call_pymchat_api("send_message", recipient_id=uid, content=msg)
         if result.get("status") == 200:
-            yield event.plain_result(f"✅ 已发送私信给用户 {user_id}")
-        else:
-            yield event.plain_result(f"❌ 发送失败: {result.get('message', '未知错误')}")
+            yield await self._render_result("发送成功", "✅", content=f"已对用户 {uid} 发送私信。")
+        else: yield event.plain_result("❌ 失败")
 
     @filter.command("pymchat get_private")
     async def pymchat_get_private(self, event: AstrMessageEvent):
-        """获取私信"""
-        full_text = event.message_str.strip()
-        limit = 5
-
-        parts = full_text.split()
-        if len(parts) >= 3 and parts[2].isdigit():
-            limit = min(int(parts[2]), 10)
-
-        if not await self._ensure_api_key():
-            yield event.plain_result("❌ 未配置 API Key")
-            return
-
-        result = await self._call_pymchat_api("get_messages", type="private", limit=limit)
-
+        result = await self._call_pymchat_api("get_messages", type="private", limit=10)
         if result.get("status") == 200:
-            messages = result.get("data", {}).get("messages", [])
-            if not messages:
-                yield event.plain_result("📭 暂无私信")
-            else:
-                lines = [f"📨 最近私信 (前 {len(messages[:5])} 条):"]
-                for m in messages[:5]:
-                    sender = m.get("sdn", m.get("sn", "未知"))
-                    content = (m.get("content", "")[:30] + "...") if len(m.get("content", "")) > 30 else m.get("content", "")
-                    lines.append(f"• {sender}: {content}")
-                yield event.plain_result("\n".join(lines))
-        else:
-            yield event.plain_result(f"❌ 获取失败: {result.get('message', '未知错误')}")
+            msgs = result.get("data", {}).get("messages", [])
+            items = [{"sender": m.get("sdn", m.get("sn", "未知")), "content": m.get("content", ""), "time": m.get("time", "")} for m in msgs]
+            yield await self._render_result("最新私信", "💬", mode="list", items=items)
+        else: yield event.plain_result("❌ 获取失败")
 
     @filter.command("pymchat friends")
     async def pymchat_friends(self, event: AstrMessageEvent):
-        """查看好友列表"""
-        if not await self._ensure_api_key():
-            yield event.plain_result("❌ 未配置 API Key")
-            return
-
         result = await self._call_pymchat_api("get_friends")
-
         if result.get("status") == 200:
             friends = result.get("data", {}).get("friends", [])
-            if not friends:
-                yield event.plain_result("👥 暂无好友")
-            else:
-                lines = [f"👥 好友 ({len(friends)} 人):"]
-                for f in friends[:10]: # 限制列表长度
-                    name = f.get("display_name", f.get("username", "未知"))
-                    uid = f.get("id", "")
-                    lines.append(f"• {name} ({uid})")
-                yield event.plain_result("\n".join(lines))
-        else:
-            yield event.plain_result(f"❌ 获取失败: {result.get('message', '未知错误')}")
-
-    @filter.command("pymchat add_friend")
-    async def pymchat_add_friend(self, event: AstrMessageEvent):
-        """添加好友"""
-        full_text = event.message_str.replace("/pymchat add_friend", "").strip()
-
-        if not full_text or not full_text.isdigit():
-            yield event.plain_result("❌ 用法: pymchat add_friend <ID>")
-            return
-
-        if not await self._ensure_api_key():
-            yield event.plain_result("❌ 未配置 API Key")
-            return
-
-        result = await self._call_pymchat_api("send_friend_request", recipient_id=full_text)
-
-        if result.get("status") == 200:
-            yield event.plain_result(f"✅ 已发送申请给用户 {full_text}")
-        else:
-            yield event.plain_result(f"❌ 添加失败: {result.get('message', '未知错误')}")
+            items = [{"sender": f.get("display_name", f.get("username", "未知")), "content": f"ID: {f.get('id', '')}"} for f in friends]
+            yield await self._render_result("好友列表", "👥", mode="list", items=items)
+        else: yield event.plain_result("❌ 获取失败")
 
     @filter.command("pymchat status")
     async def pymchat_status(self, event: AstrMessageEvent):
-        """查看插件状态"""
-        status_lines = [
-            "📊 PymChat 状态",
-            f"🔑 API Key: {'已配置' if self.api_key else '未配置'}",
-            f"👤 用户名: {self.username or '未设置'}",
-            f"🐛 调试: {'开启' if self.debug else '关闭'}"
-        ]
-        yield event.plain_result("\n".join(status_lines))
-
-    async def terminate(self):
-        """插件卸载时调用"""
-        logger.info("PymChat 插件已卸载")
-
+        status_text = f"API Key: {'已配置' if self.api_key else '未配置'}<br>用户名: {self.username or '未设置'}<br>调试模式: {'开启' if self.debug else '关闭'}"
+        yield await self._render_result("插件状态", "📊", content=status_text)
 
 def register():
-    """AstrBot 插件注册入口"""
     return PymChatPlugin
